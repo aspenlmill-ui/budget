@@ -1,0 +1,798 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Budget">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<title>Family Budget</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Figtree:wght@400;500;600&display=swap">
+<style>
+/* Layout: one narrow phone column; summary tiles first, then the form, then the ledger. Tabs for the owner, single screen for the partner. */
+:root{
+  --bg:#F2F4EF; --surface:#FFFFFF; --ink:#1B2420; --muted:#5E6A64; --line:#DCE2DA;
+  --accent:#2E6A4F; --accent-ink:#FFFFFF; --soft:#E3EEE7;
+  --good:#2E7D4F; --warn:#A96A12; --bad:#B3361F; --bad-soft:#F8E4DF; --warn-soft:#F7EBD6;
+  --display:"Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --body:"Figtree", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --r:14px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#111614; --surface:#1A211E; --ink:#E7ECE8; --muted:#9AA69F; --line:#2B3430;
+  --accent:#72C298; --accent-ink:#0F1512; --soft:#1E2D26;
+  --good:#72C298; --warn:#E3AE52; --bad:#F2806A; --bad-soft:#3A221D; --warn-soft:#352A18; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#111614; --surface:#1A211E; --ink:#E7ECE8; --muted:#9AA69F; --line:#2B3430;
+  --accent:#72C298; --accent-ink:#0F1512; --soft:#1E2D26;
+  --good:#72C298; --warn:#E3AE52; --bad:#F2806A; --bad-soft:#3A221D; --warn-soft:#352A18; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.45;padding-inline:16px;padding-block:14px 48px}
+.wrap{max-width:560px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+h1,h2,.num{font-family:var(--display)}
+h1{font-size:22px;margin:0;letter-spacing:-.01em}
+h2{font-size:17px;margin:0 0 10px;text-wrap:balance}
+.num{font-variant-numeric:tabular-nums}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+.label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+header{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap}
+.tabs{display:flex;gap:6px;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:4px;position:sticky;top:env(safe-area-inset-top,0px);z-index:5}
+.tabs button{flex:1;border:0;background:none;color:var(--muted);font:600 13px var(--body);padding:9px 6px;border-radius:999px;cursor:pointer}
+.tabs button[aria-selected="true"]{background:var(--accent);color:var(--accent-ink)}
+section{display:flex;flex-direction:column;gap:12px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px}
+.pools{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.pool{display:flex;flex-direction:column;gap:6px;min-width:0}
+.pool .left{font-size:28px;font-weight:700;line-height:1.05}
+.pool.over .left{color:var(--bad)}
+.bar{height:6px;border-radius:6px;background:var(--soft);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent);border-radius:6px}
+.pool.over .bar i{background:var(--bad)}
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:var(--soft);color:var(--ink);width:fit-content}
+.chip.bad{background:var(--bad-soft);color:var(--bad)}
+.chip.warn{background:var(--warn-soft);color:var(--warn)}
+.hero{display:flex;flex-direction:column;gap:6px;padding:20px 16px}
+.hero .big{font-size:56px;font-weight:700;line-height:1;letter-spacing:-.02em}
+.hero.over .big{color:var(--bad)}
+form,.form{display:flex;flex-direction:column;gap:10px}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.row>*{flex:1;min-width:120px}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:600;color:var(--muted)}
+input,select{font:inherit;font-size:16px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 11px;width:100%}
+input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.check{display:flex;align-items:center;gap:8px;font-size:14px}
+.check input{width:20px;height:20px}
+.btn{font:600 15px var(--body);border:0;border-radius:10px;padding:12px 14px;background:var(--accent);color:var(--accent-ink);cursor:pointer}
+.btn.ghost{background:var(--soft);color:var(--ink)}
+.btn.sm{font-size:13px;padding:7px 10px}
+.seg{display:flex;gap:6px}
+.seg button{flex:1;font:600 14px var(--body);padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.list{display:flex;flex-direction:column}
+.item{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
+.item:first-child{border-top:0}
+.item .grow{flex:1;min-width:0}
+.item .grow div{overflow-wrap:anywhere}
+.x{border:0;background:none;color:var(--muted);font:600 12px var(--body);cursor:pointer;padding:6px}
+.x.armed{color:var(--bad)}
+.alert{border-radius:var(--r);padding:14px;background:var(--bad-soft);display:flex;flex-direction:column;gap:10px}
+.alert strong{color:var(--bad)}
+.alert .opts{display:flex;flex-wrap:wrap;gap:8px}
+.kv{display:flex;justify-content:space-between;gap:10px;padding:6px 0}
+.kv b{font-family:var(--display);font-variant-numeric:tabular-nums}
+.split{display:grid;grid-template-columns:1fr auto;gap:4px 12px;align-items:baseline}
+.split .tot{border-top:1px solid var(--line);padding-top:6px}
+.tbl{overflow-x:auto}
+.bill{display:grid;grid-template-columns:1fr 92px 30px;gap:8px;align-items:center;padding:8px 0;border-top:1px solid var(--line)}
+.bill:first-child{border-top:0}
+.bill input{padding:7px 8px;font-size:15px}
+.bill .meta{font-size:12px;color:var(--muted)}
+.goal{display:flex;flex-direction:column;gap:6px;padding:10px 0;border-top:1px solid var(--line)}
+.goal:first-child{border-top:0}
+.goal.done{opacity:.6}
+.goal .top{display:flex;justify-content:space-between;gap:10px;align-items:center}
+.goal .add{display:flex;gap:6px}
+.goal .add input{max-width:110px;padding:7px 8px;font-size:15px}
+.empty{padding:18px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:var(--r)}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:999px;font-weight:600;font-size:14px;z-index:20;max-width:calc(100% - 32px)}
+@media (max-width:380px){.pools{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:no-preference){.bar i{transition:width .3s ease}}
+:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html,body{margin:0}
+.logo{width:34px;height:34px;border-radius:9px;flex-shrink:0}
+.brand{display:flex;align-items:center;gap:10px;min-width:0}
+.login{max-width:420px;margin:8vh auto 0;display:flex;flex-direction:column;gap:14px;text-align:center}
+.login .card{text-align:left}
+.logo-big{width:88px;height:88px;border-radius:22px;margin:0 auto}
+.reload{display:flex;flex-direction:column}
+.rl{display:grid;grid-template-columns:1.1fr 1fr 1.3fr 1.2fr;gap:6px;align-items:end;padding:10px 0;border-top:1px solid var(--line)}
+.rl:first-child{border-top:0}
+.rl .label{font-size:10px;letter-spacing:.05em}
+.rl-name{font-weight:600;align-self:center;overflow-wrap:anywhere}
+@media (max-width:380px){.rl{grid-template-columns:1fr 1fr}.rl-name{grid-column:1/-1}}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+</head>
+<body>
+
+<div class="wrap" id="app">
+  <header><div><div class="label">Mill family</div><h1>Weekly money</h1></div></header>
+  <div class="empty">Connecting to your budget… Spending, cushions and the plan appear here once it loads.</div>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+const BASE=["household","aspen","grace","extras"];
+let POOLS=[...BASE];
+const NAMES={household:"Household",aspen:"Me",grace:"Partner",extras:"Extras"};
+const NOTES={household:"Groceries, eating out, pets",aspen:"Personal + gas",grace:"Personal + gas",extras:"Gifts, haircuts, oil changes, odds and ends"};
+const HCATS=["Groceries","Eating out","Pets"];
+const DAY=864e5;
+const S={ready:false,owner:false,view:"grace",tab:"week",settings:null,settingsLoaded:false,txns:[],moves:[],events:[],plan:null,gPool:"grace",planMissing:false};
+let db=null;
+try{S.tab=localStorage.getItem("mfb-tab")||"week"}catch(e){}
+
+const pad=n=>String(n).padStart(2,"0");
+const todayS=()=>{const t=new Date();return `${t.getFullYear()}-${pad(t.getMonth()+1)}-${pad(t.getDate())}`};
+const dn=s=>{const [y,m,d]=s.split("-").map(Number);return Math.round(Date.UTC(y,m-1,d)/DAY)};
+const ds=n=>new Date(n*DAY).toISOString().slice(0,10);
+const pretty=n=>new Date(n*DAY).toLocaleDateString("en-US",{month:"short",day:"numeric",weekday:"short",timeZone:"UTC"});
+const short=n=>new Date(n*DAY).toLocaleDateString("en-US",{month:"short",day:"numeric",timeZone:"UTC"});
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const money=(n,c)=>{const v=Math.round((+n||0)*100)/100;const s=Math.abs(v).toLocaleString("en-US",{minimumFractionDigits:c?2:0,maximumFractionDigits:c?2:0});return (v<0?"−$":"$")+s};
+const m0=n=>money(n,false), m2=n=>money(n,true);
+const num=v=>{const n=parseFloat(String(v).replace(/[$,]/g,""));return isFinite(n)?Math.round(n*100)/100:NaN};
+
+function anchor(){return S.settings?.anchor||"2026-09-25"}
+/* Weeks run 7 days from the anchor; a manual "Start new week" begins a new week early and the 7-day rhythm continues from there. */
+function weekStarts(){
+  const t=dn(todayS()),a=dn(anchor());
+  const man=(S.settings?.starts||[]).map(dn).filter(x=>x>a).sort((x,y)=>x-y);
+  const out=[];let w=a;
+  while(w<=t){out.push(w);let nx=w+7;const m=man.find(x=>x>w&&x<nx);if(m!==undefined)nx=m;w=nx}
+  return out.length?out:[a];
+}
+function wk(s){const L=weekStarts(),n=dn(s);let r=L[0];for(const w of L){if(w<=n)r=w;else break}return r}
+function nextReset(){const L=weekStarts();return L[L.length-1]+7}
+function budgetFor(p,w){
+  const h=[...(S.settings?.history||[])].sort((a,b)=>dn(a.from)-dn(b.from));
+  let b=0;for(const e of h){if(dn(e.from)<=w)b=+e[p]||0}return b;
+}
+function compute(){
+  const cw=wk(todayS()),R={};
+  POOLS.forEach(p=>R[p]={adj:{},spent:{},cush:0});
+  for(const t of S.txns){const r=R[t.pool];if(!r)continue;
+    if(t.from==="cushion")r.cush-=t.amount;else{const w=wk(t.date);r.spent[w]=(r.spent[w]||0)+t.amount}}
+  const ap=(ep,amt,w)=>{const [k,p]=String(ep).split(":");if(!R[p])return;
+    if(k==="week")R[p].adj[w]=(R[p].adj[w]||0)+amt;else if(k==="cushion")R[p].cush+=amt};
+  for(const m of S.moves){const w=wk(m.date);ap(m.from,-m.amount,w);ap(m.to,m.amount,w)}
+  const out={cw};const L=weekStarts();
+  for(const p of POOLS){const r=R[p];let c=r.cush;
+    for(const w of L){if(w<cw)c+=budgetFor(p,w)+(r.adj[w]||0)-(r.spent[w]||0)}
+    const budget=budgetFor(p,cw),alloc=budget+(r.adj[cw]||0),spent=r.spent[cw]||0;
+    out[p]={budget,alloc,spent,left:alloc-spent,cushion:c}}
+  return out;
+}
+
+function toast(msg){const t=document.getElementById("toast");t.textContent=msg;t.hidden=false;clearTimeout(toast.h);toast.h=setTimeout(()=>t.hidden=true,2600)}
+function fail(e){console.error(e);toast(e?.code==="42501"?"You don't have permission to change that.":"Couldn't save. Check your connection and try again.")}
+
+/* ---------- render ---------- */
+function render(){
+  const app=document.getElementById("app");
+  if(!S.ready){return}
+  if(!db){app.innerHTML=`<header><div><div class="label">Weekly budget</div><h1>Weekly money</h1></div></header><div class="empty">This budget syncs through Claude. Open it from the Claude app or claude.ai while signed in to see and log spending.</div>`;return}
+  if(!S.settingsLoaded){return}
+  if(!S.settings){app.innerHTML=S.owner?firstRun():`<header><div><div class="label">Weekly budget</div><h1>Almost ready</h1></div></header><div class="empty">This budget hasn't been set up yet. Once the owner sets it up, your weekly number shows here.</div>`;return}
+  app.innerHTML=S.view==="aspen"?aspenView():graceView();
+}
+
+function weekLine(c){const n=nextReset();return `Week of ${short(c.cw)} · refills ${pretty(n)}`}
+
+function graceView(){
+  const c=compute(),g=c.grace,h=c.household;
+  const pool=S.gPool;
+  const pp=partnerPools();const mine=S.txns.filter(t=>(t.pool==="grace"||pp.includes(t.pool)||String(t.pool).startsWith("event:"))&&wk(t.date)===c.cw).sort((a,b)=>b.ts-a.ts);
+  const evs=activeEvents();
+  return `
+  <header><div><div class="label">${esc(weekLine(c))}</div><h1 class="brand"><img src="icon.svg" alt="" class="logo">${esc(NAMES.grace)}'s money</h1></div>
+    ${S.owner?`<button class="btn ghost sm" data-act="view" data-v="aspen">Back to my view</button>`:""}</header>
+  <div class="card hero ${g.left<0?"over":""}">
+    <div class="label">You can spend this week</div>
+    <div class="big num">${m2(Math.max(g.left,g.left<0?g.left:0))}</div>
+    ${g.left<0?`<div class="chip bad">${m2(-g.left)} over. Let ${esc(NAMES.aspen)} know so money can be moved to cover it.</div>`
+      :`<div class="muted small">${m0(g.spent)} spent of ${m0(g.alloc)}</div>`}
+    <div class="bar"><i style="width:${pct(g.spent,g.alloc)}%"></i></div>
+    ${g.cushion>0?`<div class="chip">Saved from past weeks: ${m2(g.cushion)}</div>`:""}
+    <div class="muted small">${esc(pretty(nextReset()))}: ${m0(budgetFor("grace",nextReset()))} gets added${g.left>0?`, and the ${m2(g.left)} you have left goes to your saved money`:""}.</div>
+  </div>
+  <div class="card pool ${h.left<0?"over":""}">
+    <div class="label">Household this week</div>
+    <div class="left num">${m2(h.left)}</div>
+    <div class="muted small">${esc(NOTES.household)}</div>
+  </div>
+  ${partnerPools().filter(p=>p!=="household").map(p=>{const x=c[p];return `<div class="card pool ${x.left<0?"over":""}">
+    <div class="label">${esc(NAMES[p])} this week</div><div class="left num">${m2(x.left)}</div>
+    <div class="bar"><i style="width:${pct(x.spent,x.alloc)}%"></i></div></div>`}).join("")}
+  ${evs.map(e=>eventCard(e,false)).join("")}
+  ${logForm(pool,true)}
+  <div class="card"><h2>This week</h2>${txList(mine,true)}</div>
+  ${pushButton()}
+  <button class="btn ghost" data-act="signout">Sign out</button>`;
+}
+
+function pct(a,b){return b>0?Math.max(0,Math.min(100,a/b*100)):(a>0?100:0)}
+
+/* ---------- special budgets (weddings, trips) ---------- */
+function activeEvents(){return S.events.filter(e=>e.active!==false).sort((a,b)=>(a.created||0)-(b.created||0))}
+function poolName(p){if(NAMES[p])return NAMES[p];if(String(p).startsWith("event:")){const e=S.events.find(x=>"event:"+x.id===p);return e?e.name:"Special budget"}return p}
+function evStats(e){const key="event:"+e.id;
+  let budget=+e.budget||0;for(const m of S.moves){if(m.to===key)budget+=m.amount;if(m.from===key)budget-=m.amount}
+  const tx=S.txns.filter(t=>t.pool===key).sort((a,b)=>b.ts-a.ts);const spent=tx.reduce((s,t)=>s+t.amount,0);
+  return {budget,spent,left:budget-spent,tx}}
+function eventCard(e,owner){const s=evStats(e);return `<div class="card pool ${s.left<0?"over":""}">
+  <div class="top" style="display:flex;justify-content:space-between;gap:8px;align-items:baseline"><div class="label">${esc(e.name)}</div>${e.active===false?`<span class="chip">Closed</span>`:""}</div>
+  <div class="left num">${m2(s.left)}</div>
+  <div class="bar"><i style="width:${pct(s.spent,s.budget)}%"></i></div>
+  <div class="muted small">${m2(s.spent)} spent of ${m2(s.budget)}${s.left<0?` · ${m2(-s.left)} over`:""}</div>
+  ${owner&&s.tx.length?`<details><summary class="small">What was bought (${s.tx.length})</summary>${txList(s.tx,false,true)}</details>`:""}
+  ${owner?`<div class="row" style="margin-top:4px">${e.active===false
+      ?`<button class="btn sm ghost" data-act="evopen" data-id="${esc(e.id)}">Reopen</button>`
+      :`<button class="btn sm ghost" data-act="evclose" data-id="${esc(e.id)}">Close it out</button>`}</div>`:""}
+</div>`}
+
+function specialTab(){
+  const act=activeEvents(),closed=S.events.filter(e=>e.active===false);
+  return `<section>
+    <div class="muted small">Special budgets are for one-off things like a wedding, a trip or a birthday. They sit outside the weekly cards, so a wedding doesn't wreck a normal week. Log purchases to them from the Week tab.</div>
+    ${act.length?act.map(e=>eventCard(e,true)).join(""):`<div class="empty">No special budgets yet. Add one below, like "Wedding, $200".</div>`}
+    <form class="card" id="evf"><h2>New special budget</h2>
+      <div class="row"><label class="f">Name<input id="ev-name" placeholder="Wyoming Christmas trip" autocomplete="off"></label>
+      <label class="f">Budget<input id="ev-amt" inputmode="decimal" placeholder="0.00"></label></div>
+      <button class="btn" type="submit">Add special budget</button>
+      <div class="muted small">${esc(NAMES.grace)} sees open special budgets and can log to them. If one runs over, add money from the Move money tab.</div>
+    </form>
+    ${closed.length?`<details class="card"><summary><b>Closed (${closed.length})</b></summary><div style="display:flex;flex-direction:column;gap:10px;margin-top:10px">${closed.map(e=>eventCard(e,true)).join("")}</div></details>`:""}
+  </section>`;
+}
+
+function logForm(pool,grace){
+  const pools=(grace?["grace",...partnerPools()]:POOLS).concat(activeEvents().map(e=>"event:"+e.id));
+  if(!pools.includes(pool))pool=pools[0];
+  const isEv=String(pool).startsWith("event:");
+  return `<form class="card" id="logf">
+    <h2>Log a purchase</h2>
+    <div class="seg" style="flex-wrap:wrap" role="group" aria-label="Whose money">${pools.map(p=>`<button type="button" data-act="pool" data-p="${esc(p)}" aria-pressed="${p===pool}" style="flex:1 1 auto">${grace&&p==="grace"?"Mine":esc(poolName(p))}</button>`).join("")}</div>
+    ${isEv?`<div class="chip">${m2(evStats(S.events.find(e=>"event:"+e.id===pool)).left)} left in ${esc(poolName(pool))}</div>`:""}
+    <div class="row">
+      <label class="f">Amount<input id="lf-amt" inputmode="decimal" placeholder="0.00" autocomplete="off" required></label>
+      <label class="f">What was it?<input id="lf-note" placeholder="${pool==="household"?"Kroger":"Gas"}" autocomplete="off"></label>
+    </div>
+    ${pool==="household"?`<label class="f">Category<select id="lf-cat">${HCATS.map(x=>`<option>${x}</option>`).join("")}</select></label>`:""}
+    ${pool!=="household"&&!isEv?`<label class="check"><input type="checkbox" id="lf-cush"> Pay from ${grace?"my saved money":"cushion"} (a splurge)</label>`:""}
+    ${grace?"":`<label class="f">Date<input type="date" id="lf-date" value="${todayS()}"></label>`}
+    <button class="btn" type="submit">Log it</button>
+  </form>`;
+}
+
+function txList(list,grace,noEmpty){
+  if(!list.length)return noEmpty?"":`<div class="muted small">Nothing logged yet this week.</div>`;
+  return `<div class="list">${list.map(t=>`<div class="item">
+    <div class="grow"><div>${esc(t.note||t.cat||"Purchase")}</div>
+    <div class="muted small">${esc(poolName(t.pool))}${t.cat?" · "+esc(t.cat):""}${t.from==="cushion"?" · from cushion":""} · ${short(dn(t.date))}</div></div>
+    <b class="num">${m2(t.amount)}</b>
+    ${S.owner||t.mine?`<button class="x" data-act="deltx" data-id="${esc(t.id)}" aria-label="Delete">Delete</button>`:""}</div>`).join("")}</div>`;
+}
+
+function aspenView(){
+  const tabs=[["week","Week"],["special","Special"],["move","Move"],["plan","Plan"],["setup","Setup"]];
+  let body="";
+  if(S.tab==="move")body=moveTab();else if(S.tab==="special")body=specialTab();else if(S.tab==="plan")body=planTab();else if(S.tab==="setup")body=setupTab();else body=weekTab();
+  const c=compute();
+  return `<header><div><div class="label">${esc(weekLine(c))}</div><h1 class="brand"><img src="icon.svg" alt="" class="logo">${esc(S.settings?.title||"Family Budget")}</h1></div></header>
+  <nav class="tabs" role="tablist">${tabs.map(([k,l])=>`<button role="tab" data-act="tab" data-t="${k}" aria-selected="${S.tab===k}">${l}</button>`).join("")}</nav>
+  ${body}`;
+}
+
+function rescueBanner(c){
+  const over=POOLS.filter(p=>c[p].left<-0.004);
+  if(!over.length)return "";
+  return over.map(p=>{
+    const need=Math.round(-c[p].left*100)/100;
+    const opts=[];
+    if(c[p].cushion>0)opts.push([`cushion:${p}`,`${NAMES[p]}'s cushion`,Math.min(need,c[p].cushion)]);
+    for(const q of POOLS)if(q!==p&&c[q].cushion>0)opts.push([`cushion:${q}`,`${NAMES[q]}'s cushion`,Math.min(need,c[q].cushion)]);
+    for(const q of POOLS)if(q!==p&&c[q].left>0)opts.push([`week:${q}`,`${NAMES[q]} this week`,Math.min(need,c[q].left)]);
+    opts.push(["usaa",(S.plan?L().save:"Savings")+" savings",need]);
+    return `<div class="alert"><div><strong>${esc(NAMES[p])} is ${m2(need)} over this week.</strong>
+      <div class="small">Cover it from one of these, starting with the cushion. If you leave it, it comes out of ${esc(NAMES[p])}'s cushion when the week resets.</div></div>
+      <div class="opts">${opts.slice(0,4).map(o=>`<button class="btn sm ${o[0]==="usaa"?"ghost":""}" data-act="rescue" data-from="${o[0]}" data-to="week:${p}" data-amt="${o[2]}">${m2(o[2])} from ${esc(o[1])}</button>`).join("")}</div></div>`;
+  }).join("");
+}
+
+function weekTab(){
+  const c=compute();
+  const list=S.txns.filter(t=>wk(t.date)===c.cw).sort((a,b)=>b.ts-a.ts);
+  const pool=S.aPool||"aspen";
+  return `<section>
+    ${rescueBanner(c)}
+    <div class="pools">${POOLS.map(p=>{const x=c[p];return `<div class="card pool ${x.left<0?"over":""}">
+      <div class="label">${NAMES[p]}</div>
+      <div class="left num">${m2(x.left)}</div>
+      <div class="bar"><i style="width:${pct(x.spent,x.alloc)}%"></i></div>
+      <div class="muted small">${m0(x.spent)} of ${m0(x.alloc)}${x.alloc!==x.budget?` <span title="Includes money moved">(budget ${m0(x.budget)})</span>`:""}</div>
+      <span class="chip ${x.cushion<0?"bad":""}">Cushion ${m2(x.cushion)}</span></div>`}).join("")}</div>
+    <div class="muted small">Cushion is what was left in past weeks. Unspent money rolls in when the week resets; overspending comes out of it.</div>
+    ${logForm(pool,false)}
+    <div class="card"><h2>This week's purchases</h2>${txList(list,false)}</div>
+    ${reloadCard(c)}
+    <div class="card"><h2>Start a new week</h2>
+      <div class="small">The week resets on its own ${esc(pretty(nextReset()))}. Start one now if it's payday or you want a fresh week early. Whatever's left (${m2(POOLS.reduce((s,p)=>s+c[p].left,0))} total) moves into the cushions, and every card refills to its full weekly amount.</div>
+      ${c.cw===dn(todayS())?`<div class="muted small" style="margin-top:8px">A new week already started today.</div>`
+        :`<button class="btn" data-act="newweek" style="margin-top:10px">Start new week</button>`}
+    </div>
+    <button class="btn ghost" data-act="view" data-v="grace">Preview ${esc(NAMES.grace)}'s view</button>
+  </section>`;
+}
+
+function epLabel(ep){if(ep==="usaa")return (S.plan?L().save:"Savings")+" savings";if(ep.startsWith("event:"))return poolName(ep)+" (special)";const [k,p]=ep.split(":");return `${NAMES[p]} ${k==="week"?"this week":"cushion"}`}
+function epAvail(ep,c){if(ep==="usaa")return null;if(ep.startsWith("event:")){const e=S.events.find(x=>"event:"+x.id===ep);return e?evStats(e).left:0}const [k,p]=ep.split(":");return k==="week"?c[p].left:c[p].cushion}
+function eps(){const e=[];for(const p of POOLS){e.push(`week:${p}`,`cushion:${p}`)}for(const v of activeEvents())e.push("event:"+v.id);e.push("usaa");return e}
+
+function moveTab(){
+  const c=compute();
+  const hist=[...S.moves].sort((a,b)=>b.ts-a.ts).slice(0,40);
+  const opt=(sel)=>eps().map(e=>`<option value="${e}" ${e===sel?"selected":""}>${esc(epLabel(e))}${epAvail(e,c)!==null?` (${m2(epAvail(e,c))})`:""}</option>`).join("");
+  return `<section>
+    ${rescueBanner(c)}
+    <form class="card" id="movef">
+      <h2>Reallocate funds</h2>
+      <label class="f">Move from<select id="mv-from">${opt(S.mvFrom||"cushion:aspen")}</select></label>
+      <label class="f">Move to<select id="mv-to">${opt(S.mvTo||"week:household")}</select></label>
+      <div class="row">
+        <label class="f">Amount<input id="mv-amt" inputmode="decimal" placeholder="0.00" required></label>
+        <label class="f">Reason<input id="mv-why" placeholder="Birthday dinner"></label>
+      </div>
+      <button class="btn" type="submit">Move money</button>
+      <div class="muted small">"This week" changes only the current week. "Cushion" is the rollover savings for that person. Moving from savings adds money that wasn't in the weekly budget.</div>
+    </form>
+    <div class="card"><h2>Where things stand</h2>
+      ${POOLS.map(p=>`<div class="kv"><span>${NAMES[p]}</span><span class="small muted">week <b>${m2(c[p].left)}</b> · cushion <b>${m2(c[p].cushion)}</b></span></div>`).join("")}
+    </div>
+    <div class="card"><h2>Move history</h2>
+      ${hist.length?`<div class="list">${hist.map(m=>`<div class="item"><div class="grow">
+        <div>${esc(epLabel(m.from))} → ${esc(epLabel(m.to))}</div>
+        <div class="muted small">${esc(m.reason||"No reason")} · ${short(dn(m.date))}</div></div>
+        <b class="num">${m2(m.amount)}</b>
+        <button class="x" data-act="delmv" data-id="${esc(m.id)}">Undo</button></div>`).join("")}</div>`
+      :`<div class="muted small">No moves yet. When a week runs over, move money here or use the buttons on the Week tab.</div>`}
+    </div>
+  </section>`;
+}
+
+/* ---------- plan (owner only; stored so only the owner can read it) ---------- */
+function billTotal(phase){return (S.plan?.bills||[]).filter(b=>b.phase==="both"||b.phase===phase).reduce((s,b)=>s+(+b.amt||0),0)}
+const L=()=>({save:S.plan?.labels?.save||"USAA",bills:S.plan?.labels?.bills||"Chase"});
+const BLANK_PLAN={accounts:{usaa:0,chase:0},floor:0,bills:[],debts:[],goals:[],paid:[],paycheck:{aspen:0,grace:0,graceBills:0},postClosing:false,labels:{save:"Savings",bills:"Bills account"}};
+
+/* Bills: this month's cycle per bill, with a paid check. */
+function dayOf(b){const n=parseInt(String(b.day||"").replace(/\D/g,""),10);return n>=1&&n<=31?n:null}
+function dueIn(y,m,d){const last=new Date(Date.UTC(y,m+1,0)).getUTCDate();return Math.round(Date.UTC(y,m,Math.min(d,last))/DAY)}
+function nextPayday(){const a=dn(S.plan?.payAnchor||anchor()),t=dn(todayS());let p=a;while(p<=t)p+=14;return p}
+function billRows(){
+  const P=S.plan,phase=P.postClosing?"post":"pre",t=new Date(),y=t.getFullYear(),m=t.getMonth(),today=dn(todayS());
+  const paid=new Set(P.paid||[]);
+  return (P.bills||[]).map((b,i)=>({b,i})).filter(x=>x.b.phase==="both"||x.b.phase===phase).map(x=>{
+    const d=dayOf(x.b);if(d===null)return {...x,due:null,paid:paid.has(x.b.name+"|"+ym(y,m)),key:x.b.name+"|"+ym(y,m)};
+    const due=dueIn(y,m,d),key=x.b.name+"|"+ds(due).slice(0,7);
+    return {...x,due,key,paid:paid.has(key),late:!paid.has(key)&&due<today};
+  }).sort((a,b)=>(a.due??1e9)-(b.due??1e9));
+}
+function ym(y,m){return `${y}-${pad(m+1)}`}
+function billsCard(){
+  const P=S.plan,rows=billRows(),pay=nextPayday(),today=dn(todayS()),lb=L();
+  const t=new Date(),y=t.getFullYear(),m=t.getMonth();
+  /* due before payday: this month's unpaid ones before payday, plus next month's early ones if payday crosses the month */
+  let beforePay=0;
+  for(const r of rows){const d=dayOf(r.b);if(d===null)continue;
+    if(!r.paid&&r.due<pay)beforePay+=+r.b.amt||0;
+    const nx=dueIn(m===11?y+1:y,(m+1)%12,d);if(nx<pay&&nx>r.due)beforePay+=+r.b.amt||0}
+  const total=rows.reduce((s,r)=>s+(+r.b.amt||0),0),paidAmt=rows.filter(r=>r.paid).reduce((s,r)=>s+(+r.b.amt||0),0);
+  const chase=+P.accounts?.chase||0,cover=chase-beforePay;
+  const month=t.toLocaleDateString("en-US",{month:"long"});
+  return `<div class="card"><h2>${esc(month)} bills</h2>
+    <div class="split">
+      <span>Due before payday (${short(pay)})</span><b class="num">${m2(beforePay)}</b>
+      <span class="muted small">${esc(lb.bills)} balance</span><b class="num small">${m2(chase)}</b>
+    </div>
+    <span class="chip ${cover<0?"bad":cover<100?"warn":""}" style="margin-top:8px">${cover<0?`${m2(-cover)} short before payday`:`Covered, ${m2(cover)} to spare`}</span>
+    <div class="bar" style="margin-top:12px"><i style="width:${pct(paidAmt,total)}%"></i></div>
+    <div class="muted small" style="margin-top:4px">${m0(paidAmt)} of ${m0(total)} paid this month</div>
+    <div class="list" style="margin-top:6px">${rows.map(r=>`<label class="item" style="cursor:pointer;${r.paid?"opacity:.55":""}">
+      <input type="checkbox" data-act="billpaid" data-key="${esc(r.key)}" ${r.paid?"checked":""} style="width:20px;height:20px">
+      <div class="grow"><div>${esc(r.b.name)}</div>
+        <div class="small ${r.late?"":"muted"}" style="${r.late?"color:var(--bad)":""}">${r.paid?"Paid":r.due===null?"No due date":r.late?`Past due ${short(r.due)}`:r.due===today?"Due today":`Due ${short(r.due)}`}</div></div>
+      <b class="num">${m2(r.b.amt)}</b></label>`).join("")}</div>
+    <details style="margin-top:8px"><summary class="small"><b>Edit bills</b></summary>
+      <div class="tbl" style="margin-top:8px">${(P.bills||[]).map((b,i)=>`<div class="bill">
+        <div style="min-width:0"><div>${esc(b.name)}</div><div class="meta">${b.day?"Due "+esc(b.day):"No date"}${b.phase!=="both"?` · ${b.phase==="pre"?"until closing":"after closing"}`:""}</div></div>
+        <input data-plan="bills.${i}.amt" inputmode="decimal" value="${esc(b.amt)}" aria-label="${esc(b.name)} amount">
+        <button class="x" data-act="delbill" data-i="${i}" aria-label="Remove ${esc(b.name)}">✕</button></div>`).join("")}</div>
+      <form class="form" id="billf" style="margin-top:10px">
+        <div class="row"><label class="f">New bill<input id="bf-name" placeholder="Electric"></label>
+          <label class="f">Monthly<input id="bf-amt" inputmode="decimal" placeholder="0.00"></label></div>
+        <div class="row"><label class="f">Due day (1–31)<input id="bf-day" inputmode="numeric" placeholder="15"></label>
+          <label class="f">When<select id="bf-phase"><option value="both">Always</option><option value="pre">Until closing</option><option value="post">After closing</option></select></label></div>
+        <button class="btn ghost" type="submit">Add bill</button>
+      </form>
+      <div class="kv small"><span class="muted">Monthly total before closing</span><b>${m2(billTotal("pre"))}</b></div>
+      <div class="kv small"><span class="muted">Monthly total after closing</span><b>${m2(billTotal("post"))}</b></div>
+    </details>
+  </div>`;
+}
+
+function planTab(){
+  const P=S.plan;
+  if(!P)return S.planMissing?`<div class="empty">No plan yet. It holds your bills, account balances, debts and savings goals, and only you can see it.<div style="margin-top:10px"><button class="btn" data-act="blankplan">Start my plan</button></div></div>`:`<div class="empty">Loading your plan…</div>`;
+  const c=compute(),lb=L();
+  const post=!!P.postClosing,phase=post?"post":"pre";
+  const weekly=POOLS.reduce((s,p)=>s+c[p].budget,0);
+  const bills=billTotal(phase);
+  const perCheck=bills*12/26;
+  const spend=weekly*2;
+  const check=+P.paycheck?.aspen||0;
+  const toSave=check-perCheck-spend;
+  const gNet=(+P.paycheck?.grace||0)-(+P.paycheck?.graceBills||0)*12/26;
+  const above=(+P.accounts?.usaa||0)-(+P.floor||0);
+  const goals=P.goals||[];
+  return `<section>
+    ${billsCard()}
+
+    <div class="card"><h2>Protected money</h2>
+      <div class="row">
+        <label class="f">${esc(lb.save)}<input data-plan="accounts.usaa" inputmode="decimal" value="${esc(P.accounts?.usaa??"")}"></label>
+        <label class="f">${esc(lb.bills)}<input data-plan="accounts.chase" inputmode="decimal" value="${esc(P.accounts?.chase??"")}"></label>
+        <label class="f">Floor<input data-plan="floor" inputmode="decimal" value="${esc(P.floor??"")}"></label>
+      </div>
+      <div class="kv"><span>${esc(lb.save)} above the floor</span><b>${m2(above)}</b></div>
+      <span class="chip ${above<0?"bad":above<500?"warn":""}">${above<0?"Below the floor. Pause extra goals until it refills.":above<500?"Close to the floor":"Floor is safe"}</span>
+      <div class="muted small">Update balances when you check the bank apps${P.accounts?.updated?` · last updated ${esc(P.accounts.updated)}`:""}.</div>
+    </div>
+
+    <div class="card"><h2>The path</h2>
+      ${goals.length?"":`<div class="muted small">No goals yet.</div>`}
+      <div class="list">${goals.map((g,i)=>`<div class="goal ${g.done?"done":""}">
+        <div class="top"><label class="check"><input type="checkbox" data-act="gdone" data-i="${i}" ${g.done?"checked":""}> <span>${esc(g.name)}</span></label>
+          <span class="num small">${m0(g.saved)} / ${m0(g.target)}</span></div>
+        ${g.when?`<div class="muted small">${esc(g.when)}</div>`:""}
+        <div class="bar"><i style="width:${pct(g.saved,g.target)}%"></i></div>
+        ${g.done?"":`<div class="add"><input id="gadd-${i}" inputmode="decimal" placeholder="Amount"><button class="btn sm ghost" data-act="gadd" data-i="${i}">Add saved</button></div>`}
+      </div>`).join("")}</div>
+      <form class="form" id="goalf" style="margin-top:10px"><div class="row">
+        <label class="f">New goal<input id="gf-name" placeholder="Emergency fund"></label>
+        <label class="f">Target<input id="gf-amt" inputmode="decimal" placeholder="0"></label></div>
+        <button class="btn ghost" type="submit">Add goal</button></form>
+    </div>
+
+    <div class="card"><h2>Paycheck splitter</h2>
+      <div class="seg" role="group" aria-label="Before or after closing">
+        <button type="button" data-act="phase" data-v="pre" aria-pressed="${!post}">Before closing</button>
+        <button type="button" data-act="phase" data-v="post" aria-pressed="${post}">After closing</button></div>
+      <div class="row" style="margin-top:10px">
+        <label class="f">${esc(NAMES.aspen)}'s check<input data-plan="paycheck.aspen" inputmode="decimal" value="${esc(P.paycheck?.aspen??"")}"></label>
+        <label class="f">${esc(NAMES.grace)}'s check<input data-plan="paycheck.grace" inputmode="decimal" value="${esc(P.paycheck?.grace??"")}"></label>
+      </div>
+      <div class="split" style="margin-top:10px">
+        <span>${esc(lb.bills)} for bills</span><b class="num">${m2(perCheck)}</b>
+        <span>Spending (2 weeks)</span><b class="num">${m2(spend)}</b>
+        <span class="tot">To ${esc(lb.save)}</span><b class="num tot" style="color:${toSave<0?"var(--bad)":"var(--good)"}">${m2(toSave)}</b>
+        <span>${esc(NAMES.grace)} to savings (after her bills)</span><b class="num">${m2(gNet)}</b>
+      </div>
+      <div class="muted small" style="margin-top:8px">Based on ${m0(bills)}/month in bills and ${m0(weekly)}/week in spending.</div>
+    </div>
+
+    <div class="card"><h2>Debts</h2>
+      ${(P.debts||[]).map((d,i)=>`<div class="bill"><div style="min-width:0"><div>${esc(d.name)}</div>${d.note?`<div class="meta">${esc(d.note)}</div>`:""}</div>
+        <input data-plan="debts.${i}.bal" inputmode="decimal" value="${esc(d.bal)}" aria-label="${esc(d.name)} balance"><button class="x" data-act="deldebt" data-i="${i}" aria-label="Remove ${esc(d.name)}">✕</button></div>`).join("")}
+      <div class="kv"><span>Total</span><b>${m2((P.debts||[]).reduce((s,d)=>s+(+d.bal||0),0))}</b></div>
+      <form class="form" id="debtf"><div class="row">
+        <label class="f">New debt<input id="df-name" placeholder="Car loan"></label>
+        <label class="f">Balance<input id="df-amt" inputmode="decimal" placeholder="0"></label></div>
+        <button class="btn ghost" type="submit">Add debt</button></form>
+    </div>
+  </section>`;
+}
+
+function namesForm(first){
+  const n=S.settings?.names||{},c=first?null:compute();
+  const val=(p,d)=>first?d:c[p].budget;
+  return `<form class="card" id="setupf"><h2>${first?"Set up your budget":"Names and budgets"}</h2>
+    ${first?`<div class="small">Name the people and weekly budgets. You can change all of it later in Setup.</div>`:""}
+    <label class="f">Budget name<input id="su-title" value="${esc(S.settings?.title||"Family Budget")}"></label>
+    <div class="row">
+      <label class="f">Your name<input id="su-aspen" value="${esc(n.aspen||"")}" placeholder="Alex"></label>
+      <label class="f">Partner's name<input id="su-grace" value="${esc(n.grace||"")}" placeholder="Sam"></label></div>
+    <div class="row">
+      <label class="f">Shared card<input id="su-household" value="${esc(n.household||"Household")}"></label>
+      <label class="f">Odds-and-ends pool<input id="su-extras" value="${esc(n.extras||"Extras")}"></label></div>
+    <div class="label" style="margin-top:4px">Weekly amounts</div>
+    <div class="row">${POOLS.map(p=>`<label class="f">${esc(first?{household:"Shared",aspen:"You",grace:"Partner",extras:"Extras"}[p]:NAMES[p])}<input id="bud-${p}" inputmode="decimal" value="${val(p,{household:300,aspen:150,grace:150,extras:25}[p])}"></label>`).join("")}</div>
+    ${first?`<label class="f">The week starts on<input type="date" id="su-anchor" value="${ds(lastFriday())}"></label>`:""}
+    <button class="btn" type="submit">${first?"Start budgeting":"Save"}</button>
+    ${first?"":`<div class="muted small">New amounts start with the current week (${short(c.cw)}). Past weeks keep their amounts, so cushions stay right.</div>`}
+  </form>`;
+}
+function lastFriday(){const t=dn(todayS());const dow=new Date(t*DAY).getUTCDay();return t-((dow-5+7)%7)}
+
+function setupTab(){
+  return `<section>
+    ${namesForm(false)}
+    <div class="card"><h2>Extra categories</h2>
+      <div class="small muted">Add weekly categories like Pets, Gas or Eating out. Each gets its own limit and cushion, and resets with the week.</div>
+      ${customs().length?`<div class="list" style="margin-top:8px">${customs().map(c=>`<div class="item"><div class="grow"><div>${esc(c.name)}</div>
+        <div class="muted small">${m0(compute()[c.id].budget)}/week · ${c.shared?`${esc(NAMES.grace)} sees it`:"Only you"}</div></div>
+        <button class="btn sm ghost" data-act="catshare" data-id="${esc(c.id)}">${c.shared?"Hide from "+esc(NAMES.grace):"Share with "+esc(NAMES.grace)}</button>
+        <button class="x" data-act="catdel" data-id="${esc(c.id)}">Remove</button></div>`).join("")}</div>`:""}
+      <form class="form" id="catf" style="margin-top:10px"><div class="row">
+        <label class="f">Category<input id="cf-name" placeholder="Pets" autocomplete="off"></label>
+        <label class="f">Per week<input id="cf-amt" inputmode="decimal" placeholder="50"></label></div>
+        <label class="check"><input type="checkbox" id="cf-shared" checked> ${esc(NAMES.grace)} can see and log to it</label>
+        <button class="btn ghost" type="submit">Add category</button>
+        <div class="muted small">To split money out of an existing card, lower that card's weekly amount above so your total stays the same.</div></form>
+    </div>
+    <div class="card"><h2>${esc(NAMES.grace)}'s view</h2>
+      <div class="small">When ${esc(NAMES.grace)} opens this page she sees only her weekly number, the ${esc(NAMES.household.toLowerCase())} number, her saved money, open special budgets and a place to log purchases. Bills, balances, debts and the plan are stored so only you can read them.</div>
+      <button class="btn ghost" data-act="view" data-v="grace" style="margin-top:10px">Preview ${esc(NAMES.grace)}'s view</button>
+    </div>
+    <div class="card"><h2>This phone</h2><div class="small muted">Get what's left every night at 7 PM, and the reload amounts the night before the week resets.</div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">${pushButton()}<button class="btn ghost" data-act="signout">Sign out</button></div></div>
+    ${S.plan?`<form class="card" id="labelf"><h2>Account names</h2>
+      <div class="row"><label class="f">Savings account<input id="lb-save" value="${esc(L().save)}"></label>
+      <label class="f">Bills account<input id="lb-bills" value="${esc(L().bills)}"></label></div>
+      <label class="f">A payday (for "due before payday")<input type="date" id="lb-pay" value="${esc(S.plan.payAnchor||anchor())}"></label>
+      <button class="btn ghost" type="submit">Save</button></form>`:""}
+  </section>`;
+}
+
+function firstRun(){
+  return `<header><div><div class="label">Welcome</div><h1>Weekly budget</h1></div></header>${namesForm(true)}`;
+}
+
+/* ---------- actions ---------- */
+function setPath(obj,path,val){const k=path.split(".");let o=obj;for(let i=0;i<k.length-1;i++){o=o[k[i]]??(o[k[i]]={})}o[k[k.length-1]]=val}
+let planQ=Promise.resolve();
+function savePlan(){const body=JSON.parse(JSON.stringify(S.plan));planQ=planQ.then(()=>db.doc("private/plan").set(body)).catch(fail);return planQ}
+async function saveSettings(patch){const cur=S.settings||{};const body={anchor:cur.anchor||anchor(),history:cur.history||[],starts:cur.starts||[],names:cur.names||{},title:cur.title||"",custom:cur.custom||[],...patch};
+  await db.doc("settings/budget").set(JSON.parse(JSON.stringify(body)))}
+function arm(b,label){if(b.classList.contains("armed"))return true;b.classList.add("armed");b.dataset.t0=b.textContent;b.textContent=label||"Tap again";setTimeout(()=>{b.classList.remove("armed");b.textContent=b.dataset.t0},3500);return false}
+
+document.addEventListener("click",async e=>{
+  const b=e.target.closest("[data-act]");if(!b)return;const a=b.dataset.act;
+  if(a==="tab"){S.tab=b.dataset.t;try{localStorage.setItem("mfb-tab",S.tab)}catch(_){}render();return}
+  if(a==="view"){S.view=b.dataset.v;render();window.scrollTo(0,0);return}
+  if(a==="pool"){e.preventDefault();if(S.view==="grace")S.gPool=b.dataset.p;else S.aPool=b.dataset.p;render();document.getElementById("lf-amt")?.focus();return}
+  if(a==="newweek"){if(!arm(b,"Tap again to start the new week"))return;
+    const t=todayS(),starts=[...(S.settings?.starts||[])].filter(x=>x!==t);starts.push(t);
+    try{await saveSettings({starts});toast("New week started. Leftovers moved to cushions.")}catch(err){fail(err)}
+    return}
+  if(a==="deltx"||a==="delmv"||a==="delbill"||a==="deldebt"){if(!arm(b))return;
+    if(a==="deltx")db.doc("txns/"+b.dataset.id).delete().then(()=>toast("Deleted")).catch(fail);
+    if(a==="delmv")db.doc("moves/"+b.dataset.id).delete().then(()=>toast("Move undone")).catch(fail);
+    if(a==="delbill"){S.plan.bills.splice(+b.dataset.i,1);render();savePlan()}
+    if(a==="deldebt"){S.plan.debts.splice(+b.dataset.i,1);render();savePlan()}
+    return}
+  if(a==="billpaid"){const k=b.dataset.key,set=new Set(S.plan.paid||[]);if(b.checked)set.add(k);else set.delete(k);
+    const cutoff=ds(dn(todayS())-100).slice(0,7);S.plan.paid=[...set].filter(x=>(x.split("|")[1]||"")>=cutoff);render();savePlan();return}
+  if(a==="evclose"||a==="evopen"){if(a==="evclose"&&!arm(b,"Tap again to close"))return;
+    try{await db.doc("events/"+b.dataset.id).update({active:a==="evopen"});toast(a==="evopen"?"Reopened":"Closed out")}catch(err){fail(err)}return}
+  if(a==="catshare"||a==="catdel"){if(a==="catdel"&&!arm(b,"Tap again to remove"))return;
+    const custom=JSON.parse(JSON.stringify(S.settings.custom||[]));const cat=custom.find(x=>x.id===b.dataset.id);if(!cat)return;
+    const patch={custom};
+    if(a==="catshare")cat.shared=!cat.shared;
+    else{cat.archived=true;const c=compute(),from=ds(c.cw),entry={from};for(const p of POOLS)entry[p]=c[p].budget;entry[cat.id]=0;
+      patch.history=(S.settings.history||[]).filter(x=>x.from!==from).concat([entry])}
+    try{await saveSettings(patch);toast(a==="catdel"?`${cat.name} removed`:"Saved")}catch(err){fail(err)}return}
+  if(a==="blankplan"){S.plan=JSON.parse(JSON.stringify(BLANK_PLAN));S.plan.payAnchor=anchor();render();savePlan();return}
+  if(a==="rescue"){const amt=+b.dataset.amt;await addMove(b.dataset.from,b.dataset.to,amt,"Cover overspending");return}
+  if(a==="phase"){S.plan.postClosing=b.dataset.v==="post";render();savePlan();return}
+  if(a==="gdone"){const g=S.plan.goals[+b.dataset.i];g.done=b.checked;render();savePlan();return}
+  if(a==="gadd"){const i=+b.dataset.i;const v=num(document.getElementById("gadd-"+i).value);if(!isFinite(v)){toast("Enter an amount first");return}
+    const g=S.plan.goals[i];g.saved=Math.round(((+g.saved||0)+v)*100)/100;render();savePlan();toast(`${m0(v)} added to ${g.name}`);return}
+});
+
+document.addEventListener("change",e=>{
+  const el=e.target;
+  if(el.dataset.plan&&S.plan){const v=num(el.value);if(!isFinite(v)){toast("Enter a number");return}
+    setPath(S.plan,el.dataset.plan,v);if(el.dataset.plan.startsWith("accounts."))S.plan.accounts.updated=todayS();render();savePlan()}
+  if(el.id==="mv-from")S.mvFrom=el.value;if(el.id==="mv-to")S.mvTo=el.value;
+});
+
+async function addMove(from,to,amount,reason){
+  if(from===to){toast("Pick two different places");return}
+  try{await db.collection("moves").add({from,to,amount:Math.round(amount*100)/100,reason:reason||"",date:todayS(),ts:Date.now()});toast(`Moved ${m2(amount)}`)}catch(err){fail(err)}
+}
+const val=id=>document.getElementById(id)?.value??"";
+
+document.addEventListener("submit",async e=>{
+  e.preventDefault();const f=e.target;
+  if(f.id==="logf"){
+    const amt=num(val("lf-amt"));if(!(amt>0)){toast("Enter the amount");return}
+    const pool=document.querySelector('#logf [data-act="pool"][aria-pressed="true"]')?.dataset.p||"aspen";
+    const doc={pool,amount:amt,note:val("lf-note").trim().slice(0,80),
+      cat:val("lf-cat"),from:document.getElementById("lf-cush")?.checked?"cushion":"week",
+      date:val("lf-date")||todayS(),ts:Date.now(),by:S.owner?"owner":"partner"};
+    try{await db.collection("txns").add(doc);toast(`Logged ${m2(amt)}`);f.reset()}catch(err){fail(err)}
+  }
+  if(f.id==="movef"){
+    const amt=num(val("mv-amt"));if(!(amt>0)){toast("Enter the amount");return}
+    await addMove(val("mv-from"),val("mv-to"),amt,val("mv-why").trim().slice(0,80));
+  }
+  if(f.id==="setupf"){
+    const first=!S.settings;
+    const names={aspen:val("su-aspen").trim()||"Me",grace:val("su-grace").trim()||"Partner",household:val("su-household").trim()||"Household",extras:val("su-extras").trim()||"Extras"};
+    const anc=first?(val("su-anchor")||ds(lastFriday())):anchor();
+    const from=first?anc:ds(compute().cw);const entry={from};
+    for(const p of POOLS){const v=num(val("bud-"+p));if(!(v>=0)){toast("Check the weekly amounts");return}entry[p]=v}
+    const hist=(S.settings?.history||[]).filter(h=>h.from!==from);hist.push(entry);
+    try{await saveSettings({anchor:anc,history:hist,names,title:val("su-title").trim().slice(0,40)||"Family Budget"});toast(first?"You're set up":"Saved")}catch(err){fail(err)}
+  }
+  if(f.id==="catf"){const name=val("cf-name").trim().slice(0,30),amt=num(val("cf-amt"));
+    if(!name||!(amt>=0)){toast("Add a name and weekly amount");return}
+    const id="c"+Date.now().toString(36);const c=compute(),from=ds(c.cw),entry={from};for(const p of POOLS)entry[p]=c[p].budget;entry[id]=amt;
+    const custom=(S.settings.custom||[]).concat([{id,name,shared:!!document.getElementById("cf-shared")?.checked}]);
+    try{await saveSettings({custom,history:(S.settings.history||[]).filter(x=>x.from!==from).concat([entry])});toast(`${name} added`);f.reset()}catch(err){fail(err)}}
+  if(f.id==="labelf"){S.plan.labels={save:val("lb-save").trim()||"Savings",bills:val("lb-bills").trim()||"Bills account"};if(val("lb-pay"))S.plan.payAnchor=val("lb-pay");render();savePlan();toast("Saved")}
+  if(f.id==="evf"){
+    const name=val("ev-name").trim().slice(0,40),amt=num(val("ev-amt"));
+    if(!name||!(amt>=0)){toast("Add a name and a budget");return}
+    try{await db.collection("events").add({name,budget:amt,active:true,created:Date.now()});toast(`${name} added`);f.reset()}catch(err){fail(err)}
+  }
+  if(f.id==="billf"){
+    const name=val("bf-name").trim(),amt=num(val("bf-amt"));
+    if(!name||!isFinite(amt)){toast("Add a name and amount");return}
+    S.plan.bills.push({name,amt,day:val("bf-day").trim(),acct:L().bills,phase:val("bf-phase")});
+    render();savePlan();toast(`Added ${name}`);
+  }
+  if(f.id==="goalf"){const name=val("gf-name").trim(),amt=num(val("gf-amt"));if(!name||!(amt>0)){toast("Add a name and target");return}
+    (S.plan.goals||(S.plan.goals=[])).push({name,target:amt,saved:0,done:false});render();savePlan()}
+  if(f.id==="debtf"){const name=val("df-name").trim(),amt=num(val("df-amt"));if(!name||!isFinite(amt)){toast("Add a name and balance");return}
+    (S.plan.debts||(S.plan.debts=[])).push({name,bal:amt});render();savePlan()}
+});
+
+/* ---------- boot ---------- */
+function customs(){return (S.settings?.custom||[]).filter(c=>!c.archived)}
+function partnerPools(){return ["household",...customs().filter(c=>c.shared).map(c=>c.id)]}
+function applyNames(){const n=S.settings?.names||{};NAMES.household=n.household||"Household";NAMES.aspen=n.aspen||"Me";NAMES.grace=n.grace||"Partner";NAMES.extras=n.extras||"Extras";
+  POOLS=[...BASE];for(const c of customs()){POOLS.push(c.id);NAMES[c.id]=c.name;NOTES[c.id]=c.shared?`Shared with ${NAMES.grace}`:"Only you see this"}}
+/* ---------- Friday reload ---------- */
+function reloadCard(c){
+  const n=nextReset();
+  const rows=POOLS.map(p=>({p,add:budgetFor(p,n),left:c[p].left,cush:c[p].cushion}));
+  const totalAdd=rows.reduce((s,r)=>s+r.add,0),totalLeft=rows.reduce((s,r)=>s+r.left,0);
+  return `<div class="card"><h2>Reload ${esc(pretty(n))}</h2>
+    <div class="small muted">Add these amounts when the week resets. Whatever is left now becomes cushion, so it isn't lost.</div>
+    <div class="reload">${rows.map(r=>`<div class="rl">
+      <div class="rl-name">${esc(NAMES[r.p])}</div>
+      <div><div class="label">Add</div><b class="num">${m0(r.add)}</b></div>
+      <div><div class="label">Left → cushion</div><b class="num" style="color:${r.left<0?"var(--bad)":"var(--good)"}">${m2(r.left)}</b></div>
+      <div><div class="label">Cushion after</div><b class="num">${m2(r.cush+r.left)}</b></div></div>`).join("")}</div>
+    <div class="kv"><span>Total to add</span><b>${m0(totalAdd)}</b></div>
+    <div class="kv"><span>Total rolling into cushions</span><b>${m2(totalLeft)}</b></div>
+  </div>`;
+}
+
+/* ---------- Supabase ---------- */
+const SB_URL="https://nlnfpnahoknfmzfusmmw.supabase.co";
+const SB_KEY="sb_publishable_BD1dyZY4JmChbVmxzelktQ_VRG1L8AN";
+const VAPID="BHF-8MfnRIpMduuGXC0PScG1sci3JbouOLAsmCK3V1PwDGyjdm9UVm7wqTsG8QhzrHoWH8BQqySjL97nmvg_olU";
+const sb=window.supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+let HID=null,ME=null,channel=null;
+const chk=r=>{if(r.error)throw r.error;return r.data};
+const mapTx=r=>({id:r.id,pool:r.pool,amount:+r.amount,note:r.note||"",cat:r.cat||"",from:r.src,date:r.date,ts:Date.parse(r.created_at),mine:r.created_by===ME});
+const mapMv=r=>({id:r.id,from:r.from_ep,to:r.to_ep,amount:+r.amount,reason:r.reason||"",date:r.date,ts:Date.parse(r.created_at)});
+const mapEv=r=>({id:r.id,name:r.name,budget:+r.budget,active:r.active,created:Date.parse(r.created_at)});
+const LOAD={
+  settings:async()=>{const d=chk(await sb.from("wb_settings").select("data").eq("household_id",HID).maybeSingle());S.settings=d?d.data:null;S.settingsLoaded=true;applyNames()},
+  txns:async()=>{S.txns=(chk(await sb.from("wb_txns").select("*").eq("household_id",HID).order("created_at"))||[]).map(mapTx)},
+  moves:async()=>{S.moves=(chk(await sb.from("wb_moves").select("*").eq("household_id",HID).order("created_at"))||[]).map(mapMv)},
+  events:async()=>{S.events=(chk(await sb.from("wb_events").select("*").eq("household_id",HID).order("created_at"))||[]).map(mapEv)},
+  plan:async()=>{if(!S.owner)return;const d=chk(await sb.from("wb_plan").select("data").eq("household_id",HID).maybeSingle());S.plan=d?JSON.parse(JSON.stringify(d.data)):null;S.planMissing=!d},
+};
+const TBL={txns:"wb_txns",moves:"wb_moves",events:"wb_events"};
+db={
+  doc(path){const [c,id]=path.split("/");return{
+    async delete(){chk(await sb.from(TBL[c]).delete().eq("id",id));await LOAD[c]();render()},
+    async set(body){const now=new Date().toISOString();
+      if(c==="settings"){chk(await sb.from("wb_settings").upsert({household_id:HID,data:body,updated_at:now}));await LOAD.settings();render()}
+      else if(c==="private"){chk(await sb.from("wb_plan").upsert({household_id:HID,data:body,updated_at:now}))}},
+    async update(patch){chk(await sb.from(TBL[c]).update(patch).eq("id",id));await LOAD[c]();render()}}},
+  collection(c){return{async add(d){
+    if(c==="txns")chk(await sb.from("wb_txns").insert({household_id:HID,pool:d.pool,amount:d.amount,note:d.note||null,cat:d.cat||null,src:d.from==="cushion"?"cushion":"week",date:d.date}));
+    if(c==="moves")chk(await sb.from("wb_moves").insert({household_id:HID,from_ep:d.from,to_ep:d.to,amount:d.amount,reason:d.reason||null,date:d.date}));
+    if(c==="events")chk(await sb.from("wb_events").insert({household_id:HID,name:d.name,budget:d.budget,active:true}));
+    await LOAD[c]();render()}}}
+};
+
+/* ---------- sign in ---------- */
+function loginView(mode){
+  const logo=`<img src="icon.svg" alt="" class="logo-big">`;
+  if(mode==="recover")return `<div class="login">${logo}<h1>Set a new password</h1>
+    <form class="card" id="newpwf"><label class="f">New password<input type="password" id="np" autocomplete="new-password" minlength="6" required></label>
+    <button class="btn" type="submit">Save password</button></form></div>`;
+  return `<div class="login">${logo}<h1>Family Budget</h1><div class="muted">Sign in with the same email and password as your old spending app.</div>
+    <form class="card" id="loginf">
+      <label class="f">Email<input type="email" id="le" autocomplete="username" required></label>
+      <label class="f">Password<input type="password" id="lp" autocomplete="current-password"></label>
+      <button class="btn" type="submit">Sign in</button>
+      <button class="btn ghost" type="button" data-act="forgot">Forgot password? Email me a reset link</button>
+    </form></div>`;
+}
+function showLogin(mode){S.ready=false;document.getElementById("app").innerHTML=loginView(mode)}
+
+document.addEventListener("submit",async e=>{
+  const f=e.target;
+  if(f.id==="loginf"){e.preventDefault();const email=val("le").trim(),password=val("lp");
+    if(!password){toast("Enter your password, or tap Forgot password");return}
+    const r=await sb.auth.signInWithPassword({email,password});if(r.error){toast("That email and password didn't match. Try again or reset your password.");return}start()}
+  if(f.id==="newpwf"){e.preventDefault();const r=await sb.auth.updateUser({password:val("np")});
+    if(r.error){toast(r.error.message);return}toast("Password saved");history.replaceState(null,"",location.pathname);start()}
+});
+document.addEventListener("click",async e=>{
+  const b=e.target.closest("[data-act]");if(!b)return;
+  if(b.dataset.act==="forgot"){const email=val("le").trim();if(!email){toast("Type your email first");return}
+    const r=await sb.auth.resetPasswordForEmail(email,{redirectTo:location.origin+location.pathname});
+    toast(r.error?"Couldn't send the email. Try again in a minute.":"Check your email for the reset link")}
+  if(b.dataset.act==="signout"){await sb.auth.signOut();if(channel)sb.removeChannel(channel);showLogin()}
+  if(b.dataset.act==="push")enablePush(b);
+});
+
+/* ---------- notifications ---------- */
+function b64(s){const p="=".repeat((4-s.length%4)%4);const r=atob((s+p).replace(/-/g,"+").replace(/_/g,"/"));return Uint8Array.from([...r].map(c=>c.charCodeAt(0)))}
+async function enablePush(btn){
+  const ios=/iphone|ipad/i.test(navigator.userAgent),standalone=window.navigator.standalone||matchMedia("(display-mode: standalone)").matches;
+  if(ios&&!standalone){toast("First add this app to your Home Screen: Share → Add to Home Screen. Then open it from there.");return}
+  if(!("serviceWorker" in navigator)||!("PushManager" in window)){toast("This browser can't show notifications");return}
+  try{
+    const perm=await Notification.requestPermission();if(perm!=="granted"){toast("Notifications are turned off for this app in your phone's settings");return}
+    const reg=await navigator.serviceWorker.register("sw.js");await navigator.serviceWorker.ready;
+    const sub=(await reg.pushManager.getSubscription())||await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:b64(VAPID)});
+    const j=sub.toJSON();
+    chk(await sb.from("push_subscriptions").upsert({user_id:ME,endpoint:j.endpoint,p256dh:j.keys.p256dh,auth_key:j.keys.auth,updated_at:new Date().toISOString()},{onConflict:"endpoint"}));
+    toast("You'll get your numbers every night at 7 PM");if(btn)btn.textContent="Notifications are on";
+  }catch(err){console.error(err);toast("Couldn't turn on notifications. Try again.")}
+}
+function pushButton(){return `<button class="btn ghost" data-act="push">Turn on 7 PM notifications</button>`}
+
+/* ---------- start ---------- */
+async function start(){
+  const {data:{session}}=await sb.auth.getSession();
+  if(!session){showLogin();return}
+  ME=session.user.id;
+  const mem=chk(await sb.from("household_members").select("household_id").eq("user_id",ME).maybeSingle());
+  if(!mem){document.getElementById("app").innerHTML=`<div class="login"><img src="icon.svg" alt="" class="logo-big"><h1>Almost there</h1><div class="empty">This account isn't part of a household yet.</div><button class="btn ghost" data-act="signout">Sign out</button></div>`;return}
+  HID=mem.household_id;
+  const hh=chk(await sb.from("households").select("created_by").eq("id",HID).maybeSingle());
+  S.owner=hh?.created_by===ME;S.view=S.owner?"aspen":"grace";
+  try{await Promise.all(Object.values(LOAD).map(f=>f()))}catch(err){fail(err)}
+  S.ready=true;render();
+  if(channel)sb.removeChannel(channel);
+  channel=sb.channel("wb-"+HID);
+  for(const [t,k] of [["wb_settings","settings"],["wb_txns","txns"],["wb_moves","moves"],["wb_events","events"],["wb_plan","plan"]]){
+    if(k==="plan"&&!S.owner)continue;
+    channel.on("postgres_changes",{event:"*",schema:"public",table:t,filter:`household_id=eq.${HID}`},()=>{LOAD[k]().then(render).catch(()=>{})});
+  }
+  channel.subscribe();
+  document.addEventListener("visibilitychange",()=>{if(!document.hidden&&HID)Promise.all(Object.values(LOAD).map(f=>f())).then(render).catch(()=>{})});
+}
+sb.auth.onAuthStateChange((ev)=>{if(ev==="PASSWORD_RECOVERY")showLogin("recover")});
+if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js").catch(()=>{});
+if(/type=recovery/.test(location.hash)){/* recovery link: onAuthStateChange shows the form */}else start();
+</script>
+</body>
+</html>
