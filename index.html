@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#000000">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="apple-mobile-web-app-title" content="Budget">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
@@ -16,21 +16,15 @@
 <style>
 /* Layout: one narrow phone column; summary tiles first, then the form, then the ledger. Tabs for the owner, single screen for the partner. */
 :root{
-  --bg:#F2F4EF; --surface:#FFFFFF; --ink:#1B2420; --muted:#5E6A64; --line:#DCE2DA;
-  --accent:#2E6A4F; --accent-ink:#FFFFFF; --soft:#E3EEE7;
-  --good:#2E7D4F; --warn:#A96A12; --bad:#B3361F; --bad-soft:#F8E4DF; --warn-soft:#F7EBD6;
+  /* One deliberate look: black like the FB logo, white as the accent, color only for status */
+  --bg:#000000; --surface:#111111; --ink:#F5F5F2; --muted:#9A9A95; --line:#262626;
+  --accent:#F5F5F2; --accent-ink:#000000; --soft:#1C1C1C;
+  --fire:#FF8A3D; --good:#3DDC84; --warn:#FFC53D; --bad:#FF5A4E;
+  --bad-soft:#2A1412; --warn-soft:#2A2310; --good-soft:#0F2519; --fire-soft:#2B1A0E;
   --display:"Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
   --body:"Figtree", "Segoe UI", system-ui, -apple-system, sans-serif;
-  --r:14px;
+  --r:14px; color-scheme:dark;
 }
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
-  --bg:#111614; --surface:#1A211E; --ink:#E7ECE8; --muted:#9AA69F; --line:#2B3430;
-  --accent:#72C298; --accent-ink:#0F1512; --soft:#1E2D26;
-  --good:#72C298; --warn:#E3AE52; --bad:#F2806A; --bad-soft:#3A221D; --warn-soft:#352A18; color-scheme:dark}}
-:root[data-theme="dark"]{
-  --bg:#111614; --surface:#1A211E; --ink:#E7ECE8; --muted:#9AA69F; --line:#2B3430;
-  --accent:#72C298; --accent-ink:#0F1512; --soft:#1E2D26;
-  --good:#72C298; --warn:#E3AE52; --bad:#F2806A; --bad-soft:#3A221D; --warn-soft:#352A18; color-scheme:dark}
 *{box-sizing:border-box}
 body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.45;padding-inline:16px;padding-block:14px 48px}
 .wrap{max-width:560px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
@@ -55,6 +49,16 @@ section{display:flex;flex-direction:column;gap:12px}
 .bar{height:6px;border-radius:6px;background:var(--soft);overflow:hidden}
 .bar i{display:block;height:100%;background:var(--accent);border-radius:6px}
 .pool.over .bar i{background:var(--bad)}
+.st-fire .bar i{background:var(--fire)}.st-good .bar i{background:var(--good)}.st-warn .bar i{background:var(--warn)}.st-bad .bar i{background:var(--bad)}
+.status{display:flex;align-items:center;gap:12px;border-radius:var(--r);padding:14px 16px;border:1px solid var(--line)}
+.status .em{font-size:30px;line-height:1}
+.status b{display:block;font-family:var(--display);font-size:18px}
+.status.fire{background:var(--fire-soft);border-color:var(--fire)}.status.fire b{color:var(--fire)}
+.status.good{background:var(--good-soft);border-color:var(--good)}.status.good b{color:var(--good)}
+.status.warn{background:var(--warn-soft);border-color:var(--warn)}.status.warn b{color:var(--warn)}
+.status.bad{background:var(--bad-soft);border-color:var(--bad)}.status.bad b{color:var(--bad)}
+.sdot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:middle}
+.sdot.fire{background:var(--fire)}.sdot.good{background:var(--good)}.sdot.warn{background:var(--warn)}.sdot.bad{background:var(--bad)}
 .chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:var(--soft);color:var(--ink);width:fit-content}
 .chip.bad{background:var(--bad-soft);color:var(--bad)}
 .chip.warn{background:var(--warn-soft);color:var(--warn)}
@@ -207,7 +211,8 @@ function graceView(){
   return `
   <header><div><div class="label">${esc(weekLine(c))}</div><h1 class="brand"><img src="icon.svg" alt="" class="logo">${esc(NAMES.grace)}'s money</h1></div>
     ${S.owner?`<button class="btn ghost sm" data-act="view" data-v="aspen">Back to my view</button>`:""}</header>
-  <div class="card hero ${g.left<0?"over":""}">
+  ${statusBanner(c,["grace",...pp])}
+  <div class="card hero st-${poolStatus(g,weekFrac(c))} ${g.left<0?"over":""}">
     <div class="label">You can spend this week</div>
     <div class="big num">${m2(Math.max(g.left,g.left<0?g.left:0))}</div>
     ${g.left<0?`<div class="chip bad">${m2(-g.left)} over. Let ${esc(NAMES.aspen)} know so money can be moved to cover it.</div>`
@@ -216,13 +221,14 @@ function graceView(){
     ${g.cushion>0?`<div class="chip">Saved from past weeks: ${m2(g.cushion)}</div>`:""}
     <div class="muted small">${esc(pretty(nextReset()))}: ${m0(budgetFor("grace",nextReset()))} gets added${g.left>0?`, and the ${m2(g.left)} you have left goes to your saved money`:""}.</div>
   </div>
-  <div class="card pool ${h.left<0?"over":""}">
-    <div class="label">Household this week</div>
+  <div class="card pool st-${poolStatus(h,weekFrac(c))} ${h.left<0?"over":""}">
+    <div class="bar" style="order:9"><i style="width:${pct(h.spent,h.alloc)}%"></i></div>
+    <div class="label"><span class="sdot ${poolStatus(h,weekFrac(c))}"></span>Household this week</div>
     <div class="left num">${m2(h.left)}</div>
     <div class="muted small">${esc(NOTES.household)}</div>
   </div>
-  ${partnerPools().filter(p=>p!=="household").map(p=>{const x=c[p];return `<div class="card pool ${x.left<0?"over":""}">
-    <div class="label">${esc(NAMES[p])} this week</div><div class="left num">${m2(x.left)}</div>
+  ${partnerPools().filter(p=>p!=="household").map(p=>{const x=c[p],st=poolStatus(x,weekFrac(c));return `<div class="card pool st-${st} ${x.left<0?"over":""}">
+    <div class="label"><span class="sdot ${st}"></span>${esc(NAMES[p])} this week</div><div class="left num">${m2(x.left)}</div>
     <div class="bar"><i style="width:${pct(x.spent,x.alloc)}%"></i></div></div>`}).join("")}
   ${evs.map(e=>eventCard(e,false)).join("")}
   ${logForm(pool,true)}
@@ -320,14 +326,38 @@ function rescueBanner(c){
   }).join("");
 }
 
+/* ---------- budget health: fire / green / yellow / red ---------- */
+function weekFrac(c){const len=Math.max(1,nextReset()-c.cw),day=dn(todayS())-c.cw+1;return Math.min(1,Math.max(0,day/len))}
+function poolStatus(x,frac){
+  if(x.left<-0.004)return x.cushion+x.left>=0?"warn":"bad";
+  if(x.alloc<=0)return "good";
+  const used=x.spent/x.alloc;
+  if(used>=0.9&&frac<0.85)return "warn";
+  if(used>frac+0.15)return "warn";
+  if(frac>=0.3&&used<=frac*0.7)return "fire";
+  return "good";
+}
+function overallStatus(c,pools){
+  const f=weekFrac(c),st=pools.map(p=>poolStatus(c[p],f));
+  if(st.includes("bad"))return "bad";if(st.includes("warn"))return "warn";
+  const spent=pools.reduce((s,p)=>s+c[p].spent,0),alloc=pools.reduce((s,p)=>s+c[p].alloc,0);
+  if(f>=0.3&&alloc>0&&spent/alloc<=f*0.7)return "fire";
+  return "good";
+}
+const STATUS={fire:["🔥","Ahead of plan","Spending is well under pace this week. Nice."],good:["🟢","On track","Spending is right where it should be."],warn:["🟡","Be careful","Something is running ahead of pace or close to its limit."],bad:["🔴","Over budget","A card is over and its cushion can't cover it. Move money or pause spending."]};
+function statusBanner(c,pools){const s=overallStatus(c,pools),[em,t,d]=STATUS[s];
+  return `<div class="status ${s}"><span class="em" aria-hidden="true">${em}</span><div><b>${t}</b><div class="small muted">${d}</div></div></div>`}
+
 function weekTab(){
   const c=compute();
   const list=S.txns.filter(t=>wk(t.date)===c.cw).sort((a,b)=>b.ts-a.ts);
   const pool=S.aPool||"aspen";
+  const f=weekFrac(c);
   return `<section>
+    ${statusBanner(c,POOLS)}
     ${rescueBanner(c)}
-    <div class="pools">${POOLS.map(p=>{const x=c[p];return `<div class="card pool ${x.left<0?"over":""}">
-      <div class="label">${NAMES[p]}</div>
+    <div class="pools">${POOLS.map(p=>{const x=c[p],st=poolStatus(x,f);return `<div class="card pool st-${st} ${x.left<0?"over":""}">
+      <div class="label"><span class="sdot ${st}"></span>${NAMES[p]}</div>
       <div class="left num">${m2(x.left)}</div>
       <div class="bar"><i style="width:${pct(x.spent,x.alloc)}%"></i></div>
       <div class="muted small">${m0(x.spent)} of ${m0(x.alloc)}${x.alloc!==x.budget?` <span title="Includes money moved">(budget ${m0(x.budget)})</span>`:""}</div>

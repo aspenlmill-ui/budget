@@ -23,6 +23,24 @@ function easternNow() {
 }
 
 // deno-lint-ignore no-explicit-any
+function poolStatus(x: any, frac: number) {
+  if (x.left < -0.004) return x.cushion + x.left >= 0 ? "warn" : "bad";
+  if (x.alloc <= 0) return "good";
+  const used = x.spent / x.alloc;
+  if (used >= 0.9 && frac < 0.85) return "warn";
+  if (used > frac + 0.15) return "warn";
+  if (frac >= 0.3 && used <= frac * 0.7) return "fire";
+  return "good";
+}
+// deno-lint-ignore no-explicit-any
+function overall(out: any, pools: string[], frac: number) {
+  const st = pools.map((p) => poolStatus(out[p], frac));
+  if (st.includes("bad")) return "🔴"; if (st.includes("warn")) return "🟡";
+  const spent = pools.reduce((s, p) => s + out[p].spent, 0), alloc = pools.reduce((s, p) => s + out[p].alloc, 0);
+  if (frac >= 0.3 && alloc > 0 && spent / alloc <= frac * 0.7) return "🔥";
+  return "🟢";
+}
+// deno-lint-ignore no-explicit-any
 function summarize(settings: any, txns: any[], moves: any[], events: any[], today: string) {
   const t = dn(today), a = dn(settings.anchor || today);
   const man = (settings.starts || []).map(dn).filter((x: number) => x > a).sort((x: number, y: number) => x - y);
@@ -48,7 +66,7 @@ function summarize(settings: any, txns: any[], moves: any[], events: any[], toda
   for (const p of pools) { const r = R[p]; let c = r.cush;
     for (const x of L) if (x < cw) c += budgetFor(p, x) + (r.adj[x] || 0) - (r.spent[x] || 0);
     const alloc = budgetFor(p, cw) + (r.adj[cw] || 0), spent = r.spent[cw] || 0;
-    out[p] = { left: alloc - spent, cushion: c, nextBudget: budgetFor(p, next) }; }
+    out[p] = { left: alloc - spent, cushion: c, nextBudget: budgetFor(p, next), alloc, spent }; }
   const names = { household: "Household", aspen: "Me", grace: "Partner", extras: "Extras", ...(settings.names || {}) };
   for (const c of customs) names[c.id] = c.name;
   const ev = events.filter((e) => e.active).map((e) => {
@@ -57,7 +75,7 @@ function summarize(settings: any, txns: any[], moves: any[], events: any[], toda
     const s = txns.filter((x) => x.pool === key).reduce((s2, x) => s2 + +x.amount, 0);
     return { name: e.name, left: b - s };
   });
-  return { out, names, customs, ev, resetTomorrow: next === t + 1 };
+  return { out, names, customs, ev, resetTomorrow: next === t + 1, frac: Math.min(1, Math.max(0, (t - cw + 1) / Math.max(1, next - cw))) };
 }
 
 Deno.serve(async (req) => {
@@ -100,7 +118,7 @@ Deno.serve(async (req) => {
     const c = cache[hid] as any;
     if (!c) { failed++; continue; }
     const isOwner = c.owner === sub.user_id;
-    const { out, names, customs, ev, resetTomorrow } = c.s;
+    const { out, names, customs, ev, resetTomorrow, frac } = c.s;
     const pools: string[] = isOwner ? ["aspen", "household", "extras", ...customs.map((x: any) => x.id)]
       : ["grace", "household", ...customs.filter((x: any) => x.shared).map((x: any) => x.id)];
     const label = (p: string) => (p === (isOwner ? "aspen" : "grace") ? "My Money" : names[p]);
@@ -109,7 +127,7 @@ Deno.serve(async (req) => {
       title = "Friday reload tomorrow";
       body = pools.map((p) => `${label(p)}: add ${money(out[p].nextBudget)} · ${money(out[p].left)} left → cushion`).join("\n");
     } else {
-      title = "Tomorrow’s starting balance";
+      title = `${overall(out, pools, frac)} Tomorrow’s starting balance`;
       body = pools.map((p) => `${label(p)}: ${money(out[p].left)}${out[p].left < 0 ? " (over)" : ""}`).join("\n");
     }
     const mine = out[isOwner ? "aspen" : "grace"];
