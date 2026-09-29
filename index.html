@@ -111,6 +111,10 @@ input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid 
 .gs li{display:flex;gap:10px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}.gs li:first-child{border-top:0}
 .gs-n{width:22px;height:22px;border-radius:50%;border:1.5px solid var(--line);display:grid;place-items:center;font-size:12px;flex-shrink:0}
 .gs li.ok .gs-n{background:var(--good);border-color:var(--good);color:#fff}.gs li.ok b{color:var(--muted);text-decoration:line-through}
+.receipt-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.receipt-row label.btn{cursor:pointer}
+.rthumb{width:44px;height:44px;object-fit:cover;border-radius:8px;border:1px solid var(--line)}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:calc(16px + env(safe-area-inset-top,0px)) 16px calc(16px + env(safe-area-inset-bottom,0px))}
+.overlay img{max-width:100%;max-height:80vh;border-radius:10px}
 .dot{width:10px;height:10px;border-radius:50%;border:2px solid var(--line);flex-shrink:0}
 .dot.ok{background:var(--good);border-color:var(--good)}
 .dot.late{border-color:var(--bad)}
@@ -314,6 +318,11 @@ function logForm(pool,grace){
     ${pool==="household"?`<label class="f">Category<select id="lf-cat">${HCATS.map(x=>`<option>${x}</option>`).join("")}</select></label>`:""}
     ${!grace&&pool!=="household"&&!isEv?`<label class="check"><input type="checkbox" id="lf-cush"> Pay from cushion (a splurge)</label>`:""}
     ${grace?"":`<label class="f">Date<input type="date" id="lf-date" value="${todayS()}"></label>`}
+    <div class="receipt-row">
+      <label class="btn ghost sm" for="lf-photo">${S.receipt?"Retake receipt":"Snap a receipt"}</label>
+      <input type="file" id="lf-photo" accept="image/*" capture="environment" hidden>
+      ${S.receipt?`<img src="${S.receipt.url}" alt="Receipt" class="rthumb"><span class="small muted">${esc(S.receipt.status||"")}</span><button type="button" class="x" data-act="rclear">Remove</button>`:`<span class="small muted">Optional. Reads the total for you.</span>`}
+    </div>
     <button class="btn" type="submit">Log it</button>
   </form>`;
 }
@@ -323,6 +332,7 @@ function txList(list,grace,noEmpty){
   return `<div class="list">${list.map(t=>`<div class="item">
     <div class="grow"><div>${esc(t.note||t.cat||(t.mine?"Purchase":`${poolName(t.pool)} purchase`))}</div>
     <div class="muted small">${esc(poolName(t.pool))}${t.cat?" · "+esc(t.cat):""}${t.from==="cushion"?" · from cushion":""} · ${short(dn(t.date))}</div></div>
+    ${t.receipt&&t.mine?`<button class="x" data-act="rview" data-path="${esc(t.receipt)}">Receipt</button>`:""}
     <b class="num">${m2(t.amount)}</b>
     ${S.owner||t.mine?`<button class="x" data-act="deltx" data-id="${esc(t.id)}" aria-label="Delete">Delete</button>`:""}</div>`).join("")}</div>`;
 }
@@ -848,6 +858,8 @@ function arm(b,label){if(b.classList.contains("armed"))return true;b.classList.a
 
 document.addEventListener("click",async e=>{
   const b=e.target.closest("[data-act]");if(!b)return;const a=b.dataset.act;
+  if(a==="rclear"){S.receipt=null;render();return}
+  if(a==="rview"){viewReceipt(b.dataset.path);return}
   if(a==="gsgo"||a==="gsdone"){const k=b.dataset.k;if(S.plan&&["buckets","partner","home"].includes(k)){S.plan.onboard={...(S.plan.onboard||{}),[k]:true};savePlan()}
     if(a==="gsgo"){S.tab=b.dataset.t;window.scrollTo(0,0)}render();return}
   if(a==="access"){try{await saveSettings({partnerFull:b.dataset.v==="full"});toast(b.dataset.v==="full"?`${NAMES.grace} can now see everything`:`${NAMES.grace} sees just their money`)}catch(err){fail(err)}return}
@@ -932,7 +944,8 @@ document.addEventListener("submit",async e=>{
     const doc={pool,amount:amt,note:val("lf-note").trim().slice(0,80),
       cat:val("lf-cat"),from:document.getElementById("lf-cush")?.checked?"cushion":"week",
       date:val("lf-date")||todayS(),ts:Date.now(),by:S.owner?"owner":"partner"};
-    try{await db.collection("txns").add(doc);toast(`Logged ${m2(amt)}`);f.reset()}catch(err){fail(err)}
+    if(S.receipt?.blob)doc.receiptBlob=S.receipt.blob;
+    try{await db.collection("txns").add(doc);toast(`Logged ${m2(amt)}`);S.receipt=null;f.reset();render()}catch(err){fail(err)}
   }
   if(f.id==="movef"){
     const amt=num(val("mv-amt"));if(!(amt>0)){toast("Enter the amount");return}
@@ -1013,6 +1026,40 @@ function reloadCard(c){
   </div>`;
 }
 
+
+/* ---------- receipt photos ---------- */
+async function shrinkImage(file){
+  const url=URL.createObjectURL(file);const img=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=url});
+  const max=1600,sc=Math.min(1,max/Math.max(img.width,img.height)),cv=document.createElement("canvas");cv.width=Math.round(img.width*sc);cv.height=Math.round(img.height*sc);
+  cv.getContext("2d").drawImage(img,0,0,cv.width,cv.height);URL.revokeObjectURL(url);
+  const blob=await new Promise(r=>cv.toBlob(r,"image/jpeg",0.72));return {blob,url:URL.createObjectURL(blob),canvas:cv};
+}
+function loadScript(src){return new Promise((res,rej)=>{const s=document.createElement("script");s.src=src;s.onload=res;s.onerror=rej;document.head.appendChild(s)})}
+function findTotal(text){
+  const lines=text.split(/\n/).map(l=>l.trim()).filter(Boolean);const amt=l=>{const m=[...l.matchAll(/(\d{1,4}[.,]\d{2})\b/g)].map(x=>parseFloat(x[1].replace(",",".")));return m.length?m[m.length-1]:null};
+  for(const re of [/\b(grand\s*)?total\b(?!.*(sub|savings|items|tax))/i,/amount\s*(due|paid)|balance\s*due|you\s*paid/i]){for(let i=lines.length-1;i>=0;i--){if(re.test(lines[i])){const v=amt(lines[i])??amt(lines[i+1]||"");if(v)return v}}}
+  const all=lines.map(amt).filter(v=>v!=null&&v<5000);return all.length?Math.max(...all):null;
+}
+function findStore(text){const l=text.split(/\n/).map(x=>x.trim()).find(x=>/[A-Za-z]{3,}/.test(x)&&x.length<32);return l?l.replace(/[^\w&' .-]/g,"").trim():""}
+document.addEventListener("change",async e=>{
+  if(e.target.id!=="lf-photo")return;const file=e.target.files?.[0];if(!file)return;
+  try{const r=await shrinkImage(file);const keep={a:val("lf-amt"),n:val("lf-note")};S.receipt={blob:r.blob,url:r.url,status:"Reading the total…"};render();
+    if(document.getElementById("lf-amt"))document.getElementById("lf-amt").value=keep.a;if(document.getElementById("lf-note"))document.getElementById("lf-note").value=keep.n;
+    if(!window.Tesseract)await loadScript("https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js");
+    const res=await window.Tesseract.recognize(r.canvas,"eng");const text=res?.data?.text||"";
+    const total=findTotal(text),store=findStore(text);
+    const amtEl=document.getElementById("lf-amt"),noteEl=document.getElementById("lf-note");
+    if(total&&amtEl&&!amtEl.value)amtEl.value=total.toFixed(2);if(store&&noteEl&&!noteEl.value)noteEl.value=store;
+    S.receipt.status=total?`Found ${m2(total)}. Check it before saving.`:"Couldn't read the total. Type it in.";
+    const st=document.querySelector(".receipt-row .small");if(st)st.textContent=S.receipt.status;
+  }catch(err){console.error(err);if(S.receipt){S.receipt.status="Photo attached. Type the total in.";const st=document.querySelector(".receipt-row .small");if(st)st.textContent=S.receipt.status}}
+});
+async function viewReceipt(path){
+  const r=await sb.storage.from("receipts").createSignedUrl(path,300);if(r.error){toast("Couldn't open the receipt");return}
+  const ov=document.createElement("div");ov.className="overlay";ov.innerHTML=`<img src="${r.data.signedUrl}" alt="Receipt"><button class="btn" type="button">Close</button>`;
+  ov.addEventListener("click",()=>ov.remove());document.body.appendChild(ov);
+}
+
 /* ---------- Supabase ---------- */
 const SB_URL="https://nlnfpnahoknfmzfusmmw.supabase.co";
 const SB_KEY="sb_publishable_BD1dyZY4JmChbVmxzelktQ_VRG1L8AN";
@@ -1025,9 +1072,9 @@ const mapMv=r=>({id:r.id,from:r.from_ep,to:r.to_ep,amount:+r.amount,reason:r.rea
 const mapEv=r=>({id:r.id,name:r.name,budget:+r.budget,active:r.active,created:Date.parse(r.created_at)});
 const LOAD={
   settings:async()=>{const d=chk(await sb.from("wb_settings").select("data").eq("household_id",HID).maybeSingle());S.settings=d?d.data:null;S.settingsLoaded=true;applyNames();if(S.ready&&!S.owner){const f=!!S.settings?.partnerFull;if(f!==S.full){S.full=f;S.view=f?"aspen":"grace";if(f)LOAD.plan().then(render).catch(()=>{})}}},
-  txns:async()=>{const [t,n]=await Promise.all([sb.from("wb_txns").select("*").eq("household_id",HID).order("created_at"),sb.from("wb_txn_notes").select("txn_id,note,cat").eq("household_id",HID)]);
+  txns:async()=>{const [t,n]=await Promise.all([sb.from("wb_txns").select("*").eq("household_id",HID).order("created_at"),sb.from("wb_txn_notes").select("txn_id,note,cat,receipt").eq("household_id",HID)]);
     const notes=Object.fromEntries((chk(n)||[]).map(x=>[x.txn_id,x]));
-    S.txns=(chk(t)||[]).map(r=>{const x=mapTx(r),nn=notes[r.id];if(nn){x.note=nn.note||"";x.cat=nn.cat||""}return x})},
+    S.txns=(chk(t)||[]).map(r=>{const x=mapTx(r),nn=notes[r.id];if(nn){x.note=nn.note||"";x.cat=nn.cat||"";x.receipt=nn.receipt||""}return x})},
   moves:async()=>{S.moves=(chk(await sb.from("wb_moves").select("*").eq("household_id",HID).order("created_at"))||[]).map(mapMv)},
   events:async()=>{S.events=(chk(await sb.from("wb_events").select("*").eq("household_id",HID).order("created_at"))||[]).map(mapEv)},
   plan:async()=>{if(!S.owner&&!S.settings?.partnerFull)return;const d=chk(await sb.from("wb_plan").select("data").eq("household_id",HID).maybeSingle());S.plan=d?JSON.parse(JSON.stringify(d.data)):null;S.planMissing=!d;if(S.plan&&S.settings)runAutopay()},
@@ -1042,7 +1089,9 @@ db={
     async update(patch){chk(await sb.from(TBL[c]).update(patch).eq("id",id));await LOAD[c]();render()}}},
   collection(c){return{async add(d){
     if(c==="txns"){const row=chk(await sb.from("wb_txns").insert({household_id:HID,pool:d.pool,amount:d.amount,src:d.from==="cushion"?"cushion":"week",date:d.date}).select("id").single());
-      if(d.note||d.cat)chk(await sb.from("wb_txn_notes").insert({txn_id:row.id,household_id:HID,shared:!["aspen","grace"].includes(d.pool),note:d.note||null,cat:d.cat||null}))}
+      let receipt=null;
+      if(d.receiptBlob){const path=`${ME}/${row.id}.jpg`;const up=await sb.storage.from("receipts").upload(path,d.receiptBlob,{contentType:"image/jpeg",upsert:true});if(up.error)toast("Saved, but the receipt photo didn't upload");else receipt=path}
+      if(d.note||d.cat||receipt)chk(await sb.from("wb_txn_notes").insert({txn_id:row.id,household_id:HID,shared:!["aspen","grace"].includes(d.pool),note:d.note||null,cat:d.cat||null,receipt}))}
     if(c==="moves")chk(await sb.from("wb_moves").insert({household_id:HID,from_ep:d.from,to_ep:d.to,amount:d.amount,reason:d.reason||null,date:d.date}));
     if(c==="events")chk(await sb.from("wb_events").insert({household_id:HID,name:d.name,budget:d.budget,active:true}));
     await LOAD[c]();render()}}}
