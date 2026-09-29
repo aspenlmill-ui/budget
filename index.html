@@ -101,6 +101,16 @@ input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid 
 .ledger>div:first-child{border-top:0}.ledger b{font-family:var(--display);font-variant-numeric:tabular-nums;white-space:nowrap}
 .ledger .strong span,.ledger .strong b{font-weight:700}.ledger .strong b{font-size:17px}
 .ledger .route input{padding:7px 8px;font-size:15px}.ledger .route input:first-child{flex:1;min-width:0}.ledger .route input[data-k="amt"]{width:100px;text-align:right}
+.steps{list-style:none;display:flex;gap:6px;padding:0;margin:0 auto 4px;justify-content:center;flex-wrap:wrap}
+.steps li{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);font-weight:600}
+.steps li span{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;border:1.5px solid var(--line);font-size:12px}
+.steps li.now{color:var(--ink)}.steps li.now span{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.steps li.done span{background:var(--good);color:#fff;border-color:var(--good)}
+.howto{margin:8px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:6px;font-size:14px}
+.gs{list-style:none;padding:0;margin:0;display:flex;flex-direction:column}
+.gs li{display:flex;gap:10px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}.gs li:first-child{border-top:0}
+.gs-n{width:22px;height:22px;border-radius:50%;border:1.5px solid var(--line);display:grid;place-items:center;font-size:12px;flex-shrink:0}
+.gs li.ok .gs-n{background:var(--good);border-color:var(--good);color:#fff}.gs li.ok b{color:var(--muted);text-decoration:line-through}
 .dot{width:10px;height:10px;border-radius:50%;border:2px solid var(--line);flex-shrink:0}
 .dot.ok{background:var(--good);border-color:var(--good)}
 .dot.late{border-color:var(--bad)}
@@ -365,12 +375,37 @@ const STATUS={fire:["🔥","Ahead of plan","Spending is well under pace this wee
 function statusBanner(c,pools){const s=overallStatus(c,pools),[em,t,d]=STATUS[s];
   return `<div class="status ${s}"><span class="em" aria-hidden="true">${em}</span><div><b>${t}</b><div class="small muted">${d}</div></div></div>`}
 
+
+/* ---------- getting started checklist (owner) ---------- */
+function onboardSteps(){
+  const P=S.plan||{},ob=P.onboard||{};
+  const push=typeof Notification!=="undefined"&&Notification.permission==="granted";
+  return [
+    ["bills","Add your bills","Plan tab → Edit bills. Put in each bill, its amount and due day. They'll autopay on the due date.",(P.bills||[]).length>0,"plan"],
+    ["balances","Enter your bank balances","Vault tab → Accounts. Type what's in each account today.",(+P.accounts?.usaa||0)+(+P.accounts?.chase||0)>0,"vault"],
+    ["buckets","Set what you're saving for","Vault tab → What we're saving for. Rename or add buckets.",!!ob.buckets,"vault"],
+    ["partner",`Invite ${NAMES.grace}`,`Setup tab shows your join code. ${NAMES.grace} makes an account and picks "Join your partner".`,!!ob.partner,"setup"],
+    ["home","Add the app to your Home Screen","In Safari tap Share → Add to Home Screen, then open it from there.",!!ob.home||matchMedia("(display-mode: standalone)").matches||!!navigator.standalone,null],
+    ["push","Turn on 7 PM notifications","Setup tab → This phone. Needs the Home Screen app on iPhone.",push,"setup"],
+    ["log","Log your first purchase","Week tab → Log a purchase.",S.txns.length>0,"week"]];
+}
+function gettingStarted(){
+  if(!S.owner||S.settings?.onboardDone)return "";
+  const st=onboardSteps(),done=st.filter(s=>s[3]).length;
+  return `<div class="card"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px"><h2>Getting started</h2><span class="small muted">${done} of ${st.length}</span></div>
+    <div class="bar" style="margin-bottom:8px"><i style="width:${pct(done,st.length)}%"></i></div>
+    <ol class="gs">${st.map(([k,t,d,ok,tab])=>`<li class="${ok?"ok":""}"><span class="gs-n">${ok?"✓":""}</span><div class="grow"><b>${esc(t)}</b><div class="small muted">${esc(d)}</div></div>
+      ${ok?"":tab?`<button class="btn sm ghost" data-act="gsgo" data-k="${k}" data-t="${tab}">Go</button>`:`<button class="btn sm ghost" data-act="gsdone" data-k="${k}">Done</button>`}</li>`).join("")}</ol>
+    <button class="x" data-act="gshide" style="margin-top:6px">Hide this list</button></div>`;
+}
+
 function weekTab(){
   const c=compute();
   const list=S.txns.filter(t=>wk(t.date)===c.cw).sort((a,b)=>b.ts-a.ts);
   const pool=S.aPool||"aspen";
   const f=weekFrac(c);
   return `<section>
+    ${gettingStarted()}
     ${statusBanner(c,POOLS)}
     ${rescueBanner(c)}
     <div class="pools">${POOLS.map(p=>{const x=c[p],st=poolStatus(x,f);return `<div class="card pool st-${st} ${x.left<0?"over":""}">
@@ -781,7 +816,11 @@ function setupTab(){
       <div class="small">When ${esc(NAMES.grace)} opens this page she sees only her weekly number, the ${esc(NAMES.household.toLowerCase())} number, her saved money, open special budgets and a place to log purchases. Bills, balances, debts and the plan are stored so only you can read them.</div>
       <button class="btn ghost" data-act="view" data-v="grace" style="margin-top:10px">Preview ${esc(NAMES.grace)}'s view</button>
     </div>
-    ${S.joinCode?`<div class="card"><h2>Invite ${esc(NAMES.grace)}</h2><div class="small muted">${esc(NAMES.grace)} creates an account in this app, picks "Join your partner" and types this code.</div>
+    ${S.owner?`<div class="card"><h2>What ${esc(NAMES.grace)} can see</h2><div class="seg" role="group" aria-label="Partner access">
+      <button type="button" data-act="access" data-v="simple" aria-pressed="${!S.settings?.partnerFull}">Just their money</button>
+      <button type="button" data-act="access" data-v="full" aria-pressed="${!!S.settings?.partnerFull}">Everything</button></div>
+      <div class="small muted" style="margin-top:8px">${S.settings?.partnerFull?`${esc(NAMES.grace)} sees the full app: bills, balances, savings, moving money. What each of you buys on your own card still stays private.`:`${esc(NAMES.grace)} sees only their card, the shared cards and special budgets. You keep bills, balances and savings to yourself.`}</div></div>`:""}
+    ${S.owner&&S.joinCode?`<div class="card"><h2>Invite ${esc(NAMES.grace)}</h2><div class="small muted">${esc(NAMES.grace)} creates an account in this app, picks "Join your partner" and types this code.</div>
       <div class="num" style="font-size:28px;font-weight:700;letter-spacing:.12em;margin-top:8px;user-select:all">${esc(S.joinCode)}</div></div>`:""}
     <div class="card"><h2>Look</h2><div class="seg" role="group" aria-label="Color mode">
       ${[["auto","Match phone"],["light","Light"],["dark","Dark"]].map(([k,l])=>`<button type="button" data-act="theme" data-v="${k}" aria-pressed="${getTheme()===k}">${l}</button>`).join("")}</div></div>
@@ -796,19 +835,23 @@ function setupTab(){
 }
 
 function firstRun(){
-  return `<header><div><div class="label">Welcome</div><h1>Weekly budget</h1></div></header>${namesForm(true)}`;
+  return `<div class="login" style="margin-top:2vh">${steps(3)}</div><header><div><div class="label">Last step</div><h1>Name your budget</h1></div></header>${namesForm(true)}`;
 }
 
 /* ---------- actions ---------- */
 function setPath(obj,path,val){const k=path.split(".");let o=obj;for(let i=0;i<k.length-1;i++){o=o[k[i]]??(o[k[i]]={})}o[k[k.length-1]]=val}
 let planQ=Promise.resolve();
 function savePlan(){const body=JSON.parse(JSON.stringify(S.plan));planQ=planQ.then(()=>db.doc("private/plan").set(body)).catch(fail);return planQ}
-async function saveSettings(patch){const cur=S.settings||{};const body={anchor:cur.anchor||anchor(),history:cur.history||[],starts:cur.starts||[],names:cur.names||{},title:cur.title||"",custom:cur.custom||[],...patch};
+async function saveSettings(patch){const cur=S.settings||{};const body={anchor:cur.anchor||anchor(),history:cur.history||[],starts:cur.starts||[],names:cur.names||{},title:cur.title||"",custom:cur.custom||[],onboardDone:!!cur.onboardDone,partnerFull:!!cur.partnerFull,...patch};
   await db.doc("settings/budget").set(JSON.parse(JSON.stringify(body)))}
 function arm(b,label){if(b.classList.contains("armed"))return true;b.classList.add("armed");b.dataset.t0=b.textContent;b.textContent=label||"Tap again";setTimeout(()=>{b.classList.remove("armed");b.textContent=b.dataset.t0},3500);return false}
 
 document.addEventListener("click",async e=>{
   const b=e.target.closest("[data-act]");if(!b)return;const a=b.dataset.act;
+  if(a==="gsgo"||a==="gsdone"){const k=b.dataset.k;if(S.plan&&["buckets","partner","home"].includes(k)){S.plan.onboard={...(S.plan.onboard||{}),[k]:true};savePlan()}
+    if(a==="gsgo"){S.tab=b.dataset.t;window.scrollTo(0,0)}render();return}
+  if(a==="access"){try{await saveSettings({partnerFull:b.dataset.v==="full"});toast(b.dataset.v==="full"?`${NAMES.grace} can now see everything`:`${NAMES.grace} sees just their money`)}catch(err){fail(err)}return}
+  if(a==="gshide"){if(!arm(b,"Tap again to hide"))return;try{await saveSettings({onboardDone:true})}catch(err){fail(err)}return}
   if(a==="tab"){S.tab=b.dataset.t;try{localStorage.setItem("mfb-tab",S.tab)}catch(_){}render();return}
   if(a==="view"){S.view=b.dataset.v;render();window.scrollTo(0,0);return}
   if(a==="pool"){e.preventDefault();if(S.view==="grace")S.gPool=b.dataset.p;else S.aPool=b.dataset.p;render();document.getElementById("lf-amt")?.focus();return}
@@ -981,13 +1024,13 @@ const mapTx=r=>({id:r.id,pool:r.pool,amount:+r.amount,note:r.note||"",cat:r.cat|
 const mapMv=r=>({id:r.id,from:r.from_ep,to:r.to_ep,amount:+r.amount,reason:r.reason||"",date:r.date,ts:Date.parse(r.created_at)});
 const mapEv=r=>({id:r.id,name:r.name,budget:+r.budget,active:r.active,created:Date.parse(r.created_at)});
 const LOAD={
-  settings:async()=>{const d=chk(await sb.from("wb_settings").select("data").eq("household_id",HID).maybeSingle());S.settings=d?d.data:null;S.settingsLoaded=true;applyNames()},
+  settings:async()=>{const d=chk(await sb.from("wb_settings").select("data").eq("household_id",HID).maybeSingle());S.settings=d?d.data:null;S.settingsLoaded=true;applyNames();if(S.ready&&!S.owner){const f=!!S.settings?.partnerFull;if(f!==S.full){S.full=f;S.view=f?"aspen":"grace";if(f)LOAD.plan().then(render).catch(()=>{})}}},
   txns:async()=>{const [t,n]=await Promise.all([sb.from("wb_txns").select("*").eq("household_id",HID).order("created_at"),sb.from("wb_txn_notes").select("txn_id,note,cat").eq("household_id",HID)]);
     const notes=Object.fromEntries((chk(n)||[]).map(x=>[x.txn_id,x]));
     S.txns=(chk(t)||[]).map(r=>{const x=mapTx(r),nn=notes[r.id];if(nn){x.note=nn.note||"";x.cat=nn.cat||""}return x})},
   moves:async()=>{S.moves=(chk(await sb.from("wb_moves").select("*").eq("household_id",HID).order("created_at"))||[]).map(mapMv)},
   events:async()=>{S.events=(chk(await sb.from("wb_events").select("*").eq("household_id",HID).order("created_at"))||[]).map(mapEv)},
-  plan:async()=>{if(!S.owner)return;const d=chk(await sb.from("wb_plan").select("data").eq("household_id",HID).maybeSingle());S.plan=d?JSON.parse(JSON.stringify(d.data)):null;S.planMissing=!d;if(S.plan&&S.settings)runAutopay()},
+  plan:async()=>{if(!S.owner&&!S.settings?.partnerFull)return;const d=chk(await sb.from("wb_plan").select("data").eq("household_id",HID).maybeSingle());S.plan=d?JSON.parse(JSON.stringify(d.data)):null;S.planMissing=!d;if(S.plan&&S.settings)runAutopay()},
 };
 const TBL={txns:"wb_txns",moves:"wb_moves",events:"wb_events"};
 db={
@@ -1006,19 +1049,31 @@ db={
 };
 
 /* ---------- sign in ---------- */
+const steps=n=>`<ol class="steps">${["Create your account","Start or join a household","Name your budget"].map((s,i)=>`<li class="${i+1<n?"done":i+1===n?"now":""}"><span>${i+1<n?"✓":i+1}</span>${s}</li>`).join("")}</ol>`;
 function loginView(mode){
   const logo=`<img src="icon.svg" alt="" class="logo-big">`;
   if(mode==="recover")return `<div class="login">${logo}<h1>Set a new password</h1>
     <form class="card" id="newpwf"><label class="f">New password<input type="password" id="np" autocomplete="new-password" minlength="6" required></label>
     <button class="btn" type="submit">Save password</button></form></div>`;
-  if(mode==="signup")return `<div class="login">${logo}<h1>Create an account</h1><div class="muted">Your budget is private to your household.</div>
+  if(mode==="checkemail")return `<div class="login">${logo}${steps(1)}<h1>Check your email</h1>
+    <div class="card" style="text-align:left"><ol class="howto">
+      <li>Open the email from Supabase Auth (check spam if it's not there in a minute).</li>
+      <li>Tap <b>Confirm your mail</b>. It brings you back here.</li>
+      <li>Sign in with the email and password you just made.</li></ol></div>
+    <button class="btn" data-act="tologin">I confirmed it, sign me in</button></div>`;
+  if(mode==="signup")return `<div class="login">${logo}${steps(1)}<h1>Create your account</h1><div class="muted">Takes about a minute. Your budget is private to your household.</div>
+    <div class="card" style="text-align:left"><b>How it works</b><ol class="howto">
+      <li>One of you starts the budget and manages it.</li>
+      <li>The other joins with a code and gets a simple screen with just their money.</li>
+      <li>Every week each card refills. What's left rolls into savings you can splurge with.</li></ol></div>
     <form class="card" id="signupf">
       <label class="f">Email<input type="email" id="se" autocomplete="username" required></label>
       <label class="f">Password (6+ characters)<input type="password" id="sp" autocomplete="new-password" minlength="6" required></label>
       <button class="btn" type="submit">Create account</button>
       <button class="btn ghost" type="button" data-act="tologin">I already have an account</button>
     </form></div>`;
-  if(mode==="household")return `<div class="login">${logo}<h1>Set up your household</h1>
+  if(mode==="household")return `<div class="login">${logo}${steps(2)}<h1>Start or join a household</h1>
+    <div class="muted">Pick one. If your partner already started, ask them for the join code in their Setup tab.</div>
     <form class="card" id="hhcreatef"><h2>Start a new budget</h2><div class="small muted">You'll manage the budget. Your partner joins with a code.</div>
       <label class="f">Your first name<input id="hc-me" autocomplete="given-name"></label>
       <button class="btn" type="submit">Start my budget</button></form>
@@ -1045,7 +1100,7 @@ document.addEventListener("submit",async e=>{
     const r=await sb.auth.signInWithPassword({email,password});if(r.error){toast("That email and password didn't match. Try again or reset your password.");return}start()}
   if(f.id==="signupf"){e.preventDefault();const r=await sb.auth.signUp({email:val("se").trim(),password:val("sp"),options:{emailRedirectTo:location.origin+location.pathname}});
     if(r.error){toast(r.error.message);return}
-    if(!r.data.session){toast("Check your email to confirm your account, then sign in");showLogin();return}start()}
+    if(!r.data.session){showLogin("checkemail");return}start()}
   if(f.id==="hhcreatef"){e.preventDefault();const r=await sb.rpc("create_my_household",{household_name:"Our Household",my_display_name:val("hc-me").trim()||null});
     if(r.error){toast(r.error.message);return}start()}
   if(f.id==="hhjoinf"){e.preventDefault();const r=await sb.rpc("join_my_household",{household_code:val("hj-code").trim(),my_display_name:val("hj-me").trim()||null});
@@ -1090,13 +1145,14 @@ async function start(){
   if(!mem){showLogin("household");return}
   HID=mem.household_id;
   const hh=chk(await sb.from("households").select("created_by,join_code").eq("id",HID).maybeSingle());S.joinCode=hh?.join_code||"";
-  S.owner=hh?.created_by===ME;S.view=S.owner?"aspen":"grace";
-  try{await Promise.all(Object.values(LOAD).map(f=>f()))}catch(err){fail(err)}
+  S.owner=hh?.created_by===ME;
+  try{await LOAD.settings();await Promise.all(Object.entries(LOAD).filter(([k])=>k!=="settings").map(([,f])=>f()))}catch(err){fail(err)}
+  S.full=S.owner||!!S.settings?.partnerFull;S.view=S.full?"aspen":"grace";S.aPool=S.owner?"aspen":"grace";
   S.ready=true;render();runAutopay();
   if(channel)sb.removeChannel(channel);
   channel=sb.channel("wb-"+HID);
   for(const [t,k] of [["wb_settings","settings"],["wb_txns","txns"],["wb_txn_notes","txns"],["wb_moves","moves"],["wb_events","events"],["wb_plan","plan"]]){
-    if(k==="plan"&&!S.owner)continue;
+    if(k==="plan"&&!S.full)continue;
     channel.on("postgres_changes",{event:"*",schema:"public",table:t,filter:`household_id=eq.${HID}`},()=>{LOAD[k]().then(render).catch(()=>{})});
   }
   channel.subscribe();
