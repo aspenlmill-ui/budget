@@ -89,6 +89,13 @@ input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid 
 .acct{display:grid;grid-template-columns:1fr 120px auto;gap:8px;align-items:center;padding:6px 0;border-top:1px solid var(--line)}
 .acct:first-of-type{border-top:0}.acct input{padding:7px 8px;font-size:15px;text-align:right}.acct>b{text-align:right}
 .kv.tot{border-top:1px solid var(--line);margin-top:4px;padding-top:8px}
+.bucket{border-top:1px solid var(--line)}.bucket:first-child{border-top:0}
+.bk-head{all:unset;box-sizing:border-box;cursor:pointer;display:grid;grid-template-columns:1fr auto;gap:4px 10px;width:100%;padding:12px 2px}
+.bk-head:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:8px}
+.bk-name{font-weight:600;min-width:0;overflow-wrap:anywhere}.bk-amt{font-weight:700;white-space:nowrap}
+.bk-bar{grid-column:1/-1;height:4px;border-radius:4px;background:var(--soft);overflow:hidden}.bk-bar i{display:block;height:100%;background:var(--accent)}
+.bk-note{grid-column:1/-1}
+.bk-actions{display:flex;flex-wrap:wrap;gap:6px;padding:0 0 12px}.bk-actions input{max-width:110px;padding:7px 8px;font-size:15px}
 .dot{width:10px;height:10px;border-radius:50%;border:2px solid var(--line);flex-shrink:0}
 .dot.ok{background:var(--good);border-color:var(--good)}
 .dot.late{border-color:var(--bad)}
@@ -576,20 +583,30 @@ function vaultTab(){
     </div>
 
     <div class="card"><h2>What we're saving for</h2>
-      <div class="list">${goals.map((g,i)=>S.editGoal===i?goalEditForm(g,i,goals.length):`<div class="goal ${g.done?"done":""}">
-        <div class="top"><label class="check"><input type="checkbox" data-act="gdone" data-i="${i}" ${g.done?"checked":""}> <span>${esc(g.name)}</span></label>
-          <span class="num small">${m0(g.saved)}${+g.target?` / ${m0(g.target)}`:""}</span></div>
-        ${g.when||+g.monthly?`<div class="muted small">${+g.monthly?`${m0(g.monthly)}/month`:""}${g.when&&+g.monthly?" · ":""}${esc(g.when||"")}</div>`:""}
-        ${+g.target?`<div class="bar"><i style="width:${pct(g.saved,g.target)}%"></i></div>`:""}
-        <div class="add">${g.done?"":`<input id="gadd-${i}" inputmode="decimal" placeholder="Amount"><button class="btn sm ghost" data-act="gadd" data-i="${i}">Add</button><button class="btn sm ghost" data-act="gtake" data-i="${i}">Take out</button>`}
-          <button class="x" data-act="gedit" data-i="${i}">Edit</button></div>
-      </div>`).join("")}</div>
+      <div class="list">${goals.map((g,i)=>g.done?"":bucketRow(g,i,goals.length)).join("")}</div>
+      ${goals.some(g=>g.done)?`<details style="margin-top:8px"><summary class="small muted">Done (${goals.filter(g=>g.done).length})</summary><div class="list">${goals.map((g,i)=>g.done?bucketRow(g,i,goals.length):"").join("")}</div></details>`:""}
       <form class="form" id="goalf" style="margin-top:10px"><div class="row">
         <label class="f">New bucket<input id="gf-name" placeholder="Car repairs"></label>
         <label class="f">Goal (optional)<input id="gf-amt" inputmode="decimal" placeholder="0"></label></div>
         <button class="btn ghost" type="submit">Add bucket</button></form>
     </div>
   </section>`;
+}
+function bucketRow(g,i,n){
+  if(S.editGoal===i)return goalEditForm(g,i,n);
+  const open=S.openGoal===i,t=+g.target,sv=+g.saved||0,full=t>0&&sv>=t;
+  return `<div class="bucket ${open?"open":""}">
+    <button class="bk-head" data-act="gopen" data-i="${i}" aria-expanded="${open}">
+      <span class="bk-name">${esc(g.name)}${g.done?` <span class="muted small">· done</span>`:""}</span>
+      <span class="num bk-amt">${m0(sv)}${t?`<span class="muted"> / ${m0(t)}</span>`:""}</span>
+      ${t?`<span class="bk-bar"><i style="width:${pct(sv,t)}%;${full?"background:var(--good)":""}"></i></span>`:""}
+      ${g.when||+g.monthly?`<span class="bk-note muted small">${+g.monthly?`${m0(g.monthly)}/mo`:""}${g.when&&+g.monthly?" · ":""}${esc(g.when||"")}</span>`:""}
+    </button>
+    ${open?`<div class="bk-actions">
+      ${g.done?"":`<input id="gadd-${i}" inputmode="decimal" placeholder="Amount"><button class="btn sm" data-act="gadd" data-i="${i}">Add</button><button class="btn sm ghost" data-act="gtake" data-i="${i}">Take out</button>`}
+      <button class="btn sm ghost" data-act="gedit" data-i="${i}">Edit</button>
+      <button class="btn sm ghost" data-act="gdone2" data-i="${i}">${g.done?"Not done":"Mark done"}</button></div>`:""}
+  </div>`;
 }
 function goalEditForm(g,i,n){return `<form class="goal" id="goaledit" data-i="${i}">
   <label class="f">Name<input id="ge-name" value="${esc(g.name)}"></label>
@@ -782,6 +799,8 @@ document.addEventListener("click",async e=>{
   if(a==="billauto"){const bl=S.plan.bills[+b.dataset.i];bl.auto=b.checked;render();savePlan();return}
   if(a==="splurge"){S.mvFrom=`cushion:${b.dataset.p}`;S.mvTo=`week:${b.dataset.p}`;S.tab="move";render();window.scrollTo(0,0);document.getElementById("mv-amt")?.focus();return}
   if(a==="delacct"){if(!arm(b))return;S.plan.otherAccts.splice(+b.dataset.i,1);render();savePlan();return}
+  if(a==="gopen"){const i=+b.dataset.i;S.openGoal=S.openGoal===i?null:i;render();return}
+  if(a==="gdone2"){const g=S.plan.goals[+b.dataset.i];g.done=!g.done;S.openGoal=null;render();savePlan();return}
   if(a==="gedit"){S.editGoal=+b.dataset.i;render();return}
   if(a==="gcancel"){S.editGoal=null;render();return}
   if(a==="gmove"){const i=+b.dataset.i,j=i+ +b.dataset.d,G=S.plan.goals;[G[i],G[j]]=[G[j],G[i]];S.editGoal=j;render();savePlan();return}
