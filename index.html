@@ -538,7 +538,7 @@ function vaultTab(){
   const total=sav+bills+others.reduce((s,a)=>s+(+a.bal||0),0);
   const inBuckets=goals.filter(g=>!g.done).reduce((s,g)=>s+(+g.saved||0),0),free=sav-inBuckets,above=sav-floor;
   const c=compute(),cush=POOLS.map(p=>({p,v:c[p].cushion})),cushTot=cush.reduce((s,x)=>s+x.v,0);
-  const due=dueBeforePayday(),pay=nextPayday(),billsLeft=bills-due;
+  const due=dueBeforePayday("chase"),pay=nextPayday(),billsLeft=bills-due;
   return `<section>
     <div class="card"><h2>Accounts</h2>
       <div class="acct"><span>${esc(lb.save)} <span class="muted small">savings</span></span><input data-plan="accounts.usaa" inputmode="decimal" value="${esc(P.accounts?.usaa??"")}"></div>
@@ -553,7 +553,7 @@ function vaultTab(){
 
     <div class="card"><h2>Bills money</h2>
       <div class="split"><span>${esc(lb.bills)} balance</span><b class="num">${m2(bills)}</b>
-        <span>Bills due before payday (${short(pay)})</span><b class="num">${m2(due)}</b>
+        <span>${esc(lb.bills)} bills due before payday (${short(pay)})</span><b class="num">${m2(due)}</b>
         <span class="tot">Left after those bills</span><b class="num tot" style="color:${billsLeft<0?"var(--bad)":"var(--good)"}">${m2(billsLeft)}</b></div>
       ${billsLeft<0?`<span class="chip bad" style="margin-top:8px">Short ${m2(-billsLeft)}. Move money into ${esc(lb.bills)} before the bills hit.</span>`:""}
     </div>
@@ -603,8 +603,8 @@ function goalEditForm(g,i,n){return `<form class="goal" id="goaledit" data-i="${
 </form>`}
 
 /* ---------- autopay: bills come out on their due date ---------- */
-function dueBeforePayday(){
-  if(!S.plan)return 0;const rows=billRows(),pay=nextPayday(),t=new Date(),y=t.getFullYear(),m=t.getMonth();let sum=0;
+function dueBeforePayday(acct){
+  if(!S.plan)return 0;const rows=billRows().filter(r=>!acct||billAcct(r.b)===acct),pay=nextPayday(),t=new Date(),y=t.getFullYear(),m=t.getMonth();let sum=0;
   for(const r of rows){const d=dayOf(r.b);if(d===null)continue;if(!r.paid&&r.due<pay)sum+=+r.b.amt||0;
     const nx=dueIn(m===11?y+1:y,(m+1)%12,d);if(nx<pay&&nx>r.due)sum+=+r.b.amt||0}
   return sum;
