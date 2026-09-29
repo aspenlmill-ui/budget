@@ -86,6 +86,9 @@ input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid 
 .item .grow div{overflow-wrap:anywhere}
 .x{border:0;background:none;color:var(--muted);font:600 12px var(--body);cursor:pointer;padding:6px}
 .x.armed{color:var(--bad)}
+.acct{display:grid;grid-template-columns:1fr 120px auto;gap:8px;align-items:center;padding:6px 0;border-top:1px solid var(--line)}
+.acct:first-of-type{border-top:0}.acct input{padding:7px 8px;font-size:15px;text-align:right}.acct>b{text-align:right}
+.kv.tot{border-top:1px solid var(--line);margin-top:4px;padding-top:8px}
 .dot{width:10px;height:10px;border-radius:50%;border:2px solid var(--line);flex-shrink:0}
 .dot.ok{background:var(--good);border-color:var(--good)}
 .dot.late{border-color:var(--bad)}
@@ -285,7 +288,7 @@ function logForm(pool,grace){
       <label class="f">What was it?<input id="lf-note" placeholder="${pool==="household"?"Kroger":"Gas"}" autocomplete="off"></label>
     </div>
     ${pool==="household"?`<label class="f">Category<select id="lf-cat">${HCATS.map(x=>`<option>${x}</option>`).join("")}</select></label>`:""}
-    ${pool!=="household"&&!isEv?`<label class="check"><input type="checkbox" id="lf-cush"> Pay from ${grace?"my saved money":"cushion"} (a splurge)</label>`:""}
+    ${!grace&&pool!=="household"&&!isEv?`<label class="check"><input type="checkbox" id="lf-cush"> Pay from cushion (a splurge)</label>`:""}
     ${grace?"":`<label class="f">Date<input type="date" id="lf-date" value="${todayS()}"></label>`}
     <button class="btn" type="submit">Log it</button>
   </form>`;
@@ -414,7 +417,7 @@ function moveTab(){
 /* ---------- plan (owner only; stored so only the owner can read it) ---------- */
 function billTotal(phase){return (S.plan?.bills||[]).filter(b=>b.phase==="both"||b.phase===phase).reduce((s,b)=>s+(+b.amt||0),0)}
 const L=()=>({save:S.plan?.labels?.save||"USAA",bills:S.plan?.labels?.bills||"Chase"});
-const BLANK_PLAN={accounts:{usaa:0,chase:0},floor:0,bills:[],debts:[],goals:[],paid:[],paycheck:{aspen:0,grace:0,graceBills:0},postClosing:false,labels:{save:"Savings",bills:"Bills account"}};
+const BLANK_PLAN={accounts:{usaa:0,chase:0},otherAccts:[],floor:0,bills:[],debts:[],goals:[{name:"Emergency fund",saved:0,target:1000,monthly:0,when:"Start here",done:false},{name:"Car repairs",saved:0,target:0,monthly:0,when:"",done:false},{name:"Holidays and birthdays",saved:0,target:0,monthly:0,when:"",done:false},{name:"Vacation",saved:0,target:0,monthly:0,when:"",done:false}],paid:[],paycheck:{aspen:0,grace:0,graceBills:0},postClosing:false,labels:{save:"Savings",bills:"Bills account"}};
 
 /* Bills: this month's cycle per bill, with a paid check. */
 function dayOf(b){const n=parseInt(String(b.day||"").replace(/\D/g,""),10);return n>=1&&n<=31?n:null}
@@ -454,6 +457,9 @@ function billsCard(){
       <div class="tbl" style="margin-top:8px">${(P.bills||[]).map((b,i)=>`<div class="bill">
         <div style="min-width:0"><div>${esc(b.name)}</div><div class="meta">${b.day?"Due "+esc(b.day):"No date"}${b.phase!=="both"?` · ${b.phase==="pre"?"until closing":"after closing"}`:""}</div></div>
         <input data-plan="bills.${i}.amt" inputmode="decimal" value="${esc(b.amt)}" aria-label="${esc(b.name)} amount">
+        <div class="meta" style="grid-column:1/-1;display:flex;gap:14px;flex-wrap:wrap">
+          <label class="check small"><input type="checkbox" data-act="billauto" data-i="${i}" ${b.auto===false?"":"checked"}> Autopay on due date</label>
+          <label class="check small">From <select data-act="billfrom" data-i="${i}" style="width:auto;padding:4px 6px;font-size:13px"><option value="bills" ${b.from!=="savings"?"selected":""}>${esc(L().bills)}</option><option value="savings" ${b.from==="savings"?"selected":""}>${esc(L().save)}</option></select></label></div>
         <button class="x" data-act="delbill" data-i="${i}" aria-label="Remove ${esc(b.name)}">✕</button></div>`).join("")}</div>
       <form class="form" id="billf" style="margin-top:10px">
         <div class="row"><label class="f">New bill<input id="bf-name" placeholder="Electric"></label>
@@ -512,6 +518,7 @@ function incomeCard(){
       <div class="row"><label class="f">Date<input type="date" id="if-date" value="${todayS()}"></label>
         <label class="f">Put it toward<select id="if-to"><option value="">Normal split</option>${goals.map((g,i)=>g.done?"":`<option value="${i}">${esc(g.name)}</option>`).join("")}</select></label></div>
       <label class="f">Note<input id="if-note" placeholder="Sept 25 check, 42 OT hours"></label>
+      <label class="check small"><input type="checkbox" id="if-bal" checked> Add it to my account balances (your check: bills portion to ${esc(L().bills)}, the rest after spending to ${esc(L().save)})</label>
       <button class="btn" type="submit">Add income</button>
     </form>
     ${split}
@@ -523,32 +530,59 @@ function incomeCard(){
 }
 
 /* ---------- money vault ---------- */
+function acctAdjust(which,delta){const P=S.plan;P.accounts=P.accounts||{};P.accounts[which]=Math.round(((+P.accounts[which]||0)+delta)*100)/100}
+function billAcct(b){return b.from==="savings"?"usaa":"chase"}
 function vaultTab(){
   const P=S.plan;if(!P)return planTab();
-  const lb=L(),bal=+P.accounts?.usaa||0,floor=+P.floor||0,goals=P.goals||[];
-  const inBuckets=goals.filter(g=>!g.done).reduce((s,g)=>s+(+g.saved||0),0),free=bal-inBuckets,above=bal-floor;
+  const lb=L(),sav=+P.accounts?.usaa||0,bills=+P.accounts?.chase||0,floor=+P.floor||0,goals=P.goals||[],others=P.otherAccts||[];
+  const total=sav+bills+others.reduce((s,a)=>s+(+a.bal||0),0);
+  const inBuckets=goals.filter(g=>!g.done).reduce((s,g)=>s+(+g.saved||0),0),free=sav-inBuckets,above=sav-floor;
+  const c=compute(),cush=POOLS.map(p=>({p,v:c[p].cushion})),cushTot=cush.reduce((s,x)=>s+x.v,0);
+  const due=dueBeforePayday(),pay=nextPayday(),billsLeft=bills-due;
   return `<section>
-    <div class="card"><h2>Money Vault</h2>
-      <div class="small muted">Buckets are jobs for the money already sitting in ${esc(lb.save)}. They don't move money between accounts; they tell you what each dollar is for.</div>
-      <div class="row" style="margin-top:10px">
-        <label class="f">${esc(lb.save)} balance<input data-plan="accounts.usaa" inputmode="decimal" value="${esc(P.accounts?.usaa??"")}"></label>
-        <label class="f">${esc(lb.bills)} balance<input data-plan="accounts.chase" inputmode="decimal" value="${esc(P.accounts?.chase??"")}"></label>
-        <label class="f">Protected floor<input data-plan="floor" inputmode="decimal" value="${esc(P.floor??"")}"></label></div>
-      <div class="split" style="margin-top:10px">
-        <span>In buckets</span><b class="num">${m2(inBuckets)}</b>
-        <span>Not assigned yet</span><b class="num" style="color:${free<0?"var(--bad)":"inherit"}">${m2(free)}</b>
-        <span class="tot">Above the floor</span><b class="num tot">${m2(above)}</b></div>
-      <span class="chip ${above<0?"bad":above<500?"warn":""}" style="margin-top:8px">${above<0?"Below the floor. Pause extra goals until it refills.":above<500?"Close to the floor":"Floor is safe"}</span>
-      ${free<0?`<div class="chip bad" style="margin-top:6px">Buckets add up to more than the balance. Take some back out.</div>`:""}
-      <div class="muted small" style="margin-top:6px">Update balances when you check the bank apps${P.accounts?.updated?` · last updated ${esc(P.accounts.updated)}`:""}.</div>
+    <div class="card"><h2>Accounts</h2>
+      <div class="acct"><span>${esc(lb.save)} <span class="muted small">savings</span></span><input data-plan="accounts.usaa" inputmode="decimal" value="${esc(P.accounts?.usaa??"")}"></div>
+      <div class="acct"><span>${esc(lb.bills)} <span class="muted small">bills</span></span><input data-plan="accounts.chase" inputmode="decimal" value="${esc(P.accounts?.chase??"")}"></div>
+      ${others.map((a,i)=>`<div class="acct"><span>${esc(a.name)}</span><input data-plan="otherAccts.${i}.bal" inputmode="decimal" value="${esc(a.bal)}"><button class="x" data-act="delacct" data-i="${i}" aria-label="Remove ${esc(a.name)}">✕</button></div>`).join("")}
+      <div class="kv tot"><span><b>Total in the bank</b></span><b>${m2(total)}</b></div>
+      <details><summary class="small"><b>Add an account</b></summary><form class="form" id="acctf" style="margin-top:8px"><div class="row">
+        <label class="f">Name<input id="ac-name" placeholder="Grace Checking"></label><label class="f">Balance<input id="ac-bal" inputmode="decimal" placeholder="0"></label></div>
+        <button class="btn ghost" type="submit">Add account</button></form></details>
+      <div class="muted small">Balances update on their own when bills autopay and when you log a paycheck. Fix them any time you check the bank apps${P.accounts?.updated?` · last checked ${esc(P.accounts.updated)}`:""}.</div>
     </div>
-    <div class="card"><h2>Buckets and goals</h2>
-      <div class="list">${goals.map((g,i)=>`<div class="goal ${g.done?"done":""}">
+
+    <div class="card"><h2>Bills money</h2>
+      <div class="split"><span>${esc(lb.bills)} balance</span><b class="num">${m2(bills)}</b>
+        <span>Bills due before payday (${short(pay)})</span><b class="num">${m2(due)}</b>
+        <span class="tot">Left after those bills</span><b class="num tot" style="color:${billsLeft<0?"var(--bad)":"var(--good)"}">${m2(billsLeft)}</b></div>
+      ${billsLeft<0?`<span class="chip bad" style="margin-top:8px">Short ${m2(-billsLeft)}. Move money into ${esc(lb.bills)} before the bills hit.</span>`:""}
+    </div>
+
+    <div class="card"><h2>Splurge money</h2>
+      <div class="small muted">Weekly money that wasn't spent rolls in here. Only you can move it; ${esc(NAMES.grace)} just sees her amount.</div>
+      ${cush.map(x=>`<div class="acct"><span>${esc(NAMES[x.p])}</span><b class="num" style="color:${x.v<0?"var(--bad)":"inherit"}">${m2(x.v)}</b>
+        ${x.v>0?`<button class="btn sm ghost" data-act="splurge" data-p="${x.p}">Move to spending</button>`:"<span></span>"}</div>`).join("")}
+      <div class="kv tot"><span><b>Total splurge money</b></span><b>${m2(cushTot)}</b></div>
+    </div>
+
+    <div class="card"><h2>Savings</h2>
+      <div class="split"><span>${esc(lb.save)}</span><b class="num">${m2(sav)}</b>
+        <span>Set aside in buckets</span><b class="num">${m2(inBuckets)}</b>
+        <span>Not assigned yet</span><b class="num" style="color:${free<0?"var(--bad)":"inherit"}">${m2(free)}</b>
+        <span class="tot">Above the protected floor</span><b class="num tot">${m2(above)}</b></div>
+      <label class="f" style="margin-top:8px">Protected floor<input data-plan="floor" inputmode="decimal" value="${esc(P.floor??"")}"></label>
+      <span class="chip ${above<0?"bad":above<500?"warn":""}" style="margin-top:8px">${above<0?"Below the floor. Pause extra goals until it refills.":above<500?"Close to the floor":"Floor is safe"}</span>
+      ${free<0?`<div class="chip bad" style="margin-top:6px">Buckets add up to more than ${esc(lb.save)} has. Take some back out.</div>`:""}
+    </div>
+
+    <div class="card"><h2>What we're saving for</h2>
+      <div class="list">${goals.map((g,i)=>S.editGoal===i?goalEditForm(g,i,goals.length):`<div class="goal ${g.done?"done":""}">
         <div class="top"><label class="check"><input type="checkbox" data-act="gdone" data-i="${i}" ${g.done?"checked":""}> <span>${esc(g.name)}</span></label>
           <span class="num small">${m0(g.saved)}${+g.target?` / ${m0(g.target)}`:""}</span></div>
-        ${g.when?`<div class="muted small">${esc(g.when)}</div>`:""}
+        ${g.when||+g.monthly?`<div class="muted small">${+g.monthly?`${m0(g.monthly)}/month`:""}${g.when&&+g.monthly?" · ":""}${esc(g.when||"")}</div>`:""}
         ${+g.target?`<div class="bar"><i style="width:${pct(g.saved,g.target)}%"></i></div>`:""}
-        ${g.done?"":`<div class="add"><input id="gadd-${i}" inputmode="decimal" placeholder="Amount"><button class="btn sm ghost" data-act="gadd" data-i="${i}">Add</button><button class="btn sm ghost" data-act="gtake" data-i="${i}">Take out</button></div>`}
+        <div class="add">${g.done?"":`<input id="gadd-${i}" inputmode="decimal" placeholder="Amount"><button class="btn sm ghost" data-act="gadd" data-i="${i}">Add</button><button class="btn sm ghost" data-act="gtake" data-i="${i}">Take out</button>`}
+          <button class="x" data-act="gedit" data-i="${i}">Edit</button></div>
       </div>`).join("")}</div>
       <form class="form" id="goalf" style="margin-top:10px"><div class="row">
         <label class="f">New bucket<input id="gf-name" placeholder="Car repairs"></label>
@@ -557,7 +591,37 @@ function vaultTab(){
     </div>
   </section>`;
 }
+function goalEditForm(g,i,n){return `<form class="goal" id="goaledit" data-i="${i}">
+  <label class="f">Name<input id="ge-name" value="${esc(g.name)}"></label>
+  <div class="row"><label class="f">Goal<input id="ge-target" inputmode="decimal" value="${esc(g.target||"")}"></label>
+    <label class="f">Per month<input id="ge-monthly" inputmode="decimal" value="${esc(g.monthly||"")}"></label>
+    <label class="f">Set aside now<input id="ge-saved" inputmode="decimal" value="${esc(g.saved||0)}"></label></div>
+  <label class="f">Note<input id="ge-when" value="${esc(g.when||"")}" placeholder="When or why"></label>
+  <div class="row"><button class="btn" type="submit">Save</button><button class="btn ghost" type="button" data-act="gcancel">Cancel</button></div>
+  <div class="row">${i>0?`<button class="btn sm ghost" type="button" data-act="gmove" data-i="${i}" data-d="-1">Move up</button>`:""}${i<n-1?`<button class="btn sm ghost" type="button" data-act="gmove" data-i="${i}" data-d="1">Move down</button>`:""}
+    <button class="btn sm ghost" type="button" data-act="gdel" data-i="${i}" style="color:var(--bad)">Delete bucket</button></div>
+</form>`}
 
+/* ---------- autopay: bills come out on their due date ---------- */
+function dueBeforePayday(){
+  if(!S.plan)return 0;const rows=billRows(),pay=nextPayday(),t=new Date(),y=t.getFullYear(),m=t.getMonth();let sum=0;
+  for(const r of rows){const d=dayOf(r.b);if(d===null)continue;if(!r.paid&&r.due<pay)sum+=+r.b.amt||0;
+    const nx=dueIn(m===11?y+1:y,(m+1)%12,d);if(nx<pay&&nx>r.due)sum+=+r.b.amt||0}
+  return sum;
+}
+function runAutopay(){
+  if(!S.owner||!S.plan)return;const P=S.plan,today=dn(todayS());
+  if(!P.autoStart){P.autoStart=todayS();savePlan()}
+  const start=dn(P.autoStart),skip=new Set(P.skipAuto||[]);let changed=0;const paid=new Set(P.paid||[]);
+  for(const r of billRows()){
+    if(r.b.auto===false||r.due===null||r.paid||r.due>today||skip.has(r.key)||paid.has(r.key))continue;
+    if(r.due<Math.max(start,r.b.added?dn(r.b.added):start))continue;
+    const amt=+r.b.amt||0;paid.add(r.key);
+    P.paidLog=(P.paidLog||[]).filter(x=>x.key!==r.key).concat([{key:r.key,amount:amt,date:ds(r.due),auto:true,acct:billAcct(r.b)}]);
+    acctAdjust(billAcct(r.b),-amt);changed++;
+  }
+  if(changed){P.paid=[...paid];savePlan();toast(`${changed} bill${changed>1?"s":""} paid automatically`)}
+}
 /* ---------- what if I spend ---------- */
 function runScenario(amt,pool){
   const c=compute(),steps=[];let need=amt;
@@ -711,9 +775,20 @@ document.addEventListener("click",async e=>{
     return}
   if(a==="payopen"){S.payOpen=b.dataset.key;render();document.getElementById("pf-amt")?.focus();return}
   if(a==="paycancel"){S.payOpen=null;render();return}
-  if(a==="billundo"){const k=b.dataset.key;S.plan.paid=(S.plan.paid||[]).filter(x=>x!==k);S.plan.paidLog=(S.plan.paidLog||[]).filter(x=>x.key!==k);render();savePlan();return}
+  if(a==="billundo"){const k=b.dataset.key,info=(S.plan.paidLog||[]).find(x=>x.key===k);
+    if(info&&info.acct)acctAdjust(info.acct,+info.amount||0);
+    S.plan.paid=(S.plan.paid||[]).filter(x=>x!==k);S.plan.paidLog=(S.plan.paidLog||[]).filter(x=>x.key!==k);
+    S.plan.skipAuto=[...new Set([...(S.plan.skipAuto||[]),k])];render();savePlan();return}
+  if(a==="billauto"){const bl=S.plan.bills[+b.dataset.i];bl.auto=b.checked;render();savePlan();return}
+  if(a==="splurge"){S.mvFrom=`cushion:${b.dataset.p}`;S.mvTo=`week:${b.dataset.p}`;S.tab="move";render();window.scrollTo(0,0);document.getElementById("mv-amt")?.focus();return}
+  if(a==="delacct"){if(!arm(b))return;S.plan.otherAccts.splice(+b.dataset.i,1);render();savePlan();return}
+  if(a==="gedit"){S.editGoal=+b.dataset.i;render();return}
+  if(a==="gcancel"){S.editGoal=null;render();return}
+  if(a==="gmove"){const i=+b.dataset.i,j=i+ +b.dataset.d,G=S.plan.goals;[G[i],G[j]]=[G[j],G[i]];S.editGoal=j;render();savePlan();return}
+  if(a==="gdel"){if(!arm(b,"Tap again to delete"))return;S.plan.goals.splice(+b.dataset.i,1);S.editGoal=null;render();savePlan();return}
   if(a==="delinc"){if(!arm(b))return;const inc=(S.plan.income||[]).find(x=>String(x.id)===b.dataset.id);if(!inc)return;
     if(inc.to!==""&&inc.to!=null&&S.plan.goals?.[inc.to]){const g=S.plan.goals[inc.to];g.saved=Math.round(((+g.saved||0)-inc.amt)*100)/100}
+    if(inc.applied){acctAdjust("chase",-(inc.applied.chase||0));acctAdjust("usaa",-(inc.applied.usaa||0))}
     S.plan.income=S.plan.income.filter(x=>x!==inc);render();savePlan();return}
   if(a==="gtake"){const i=+b.dataset.i;const v=num(document.getElementById("gadd-"+i).value);if(!(v>0)){toast("Enter an amount first");return}
     const g=S.plan.goals[i];g.saved=Math.round(((+g.saved||0)-v)*100)/100;render();savePlan();toast(`${m0(v)} taken out of ${g.name}`);return}
@@ -740,7 +815,8 @@ document.addEventListener("click",async e=>{
 document.addEventListener("change",e=>{
   const el=e.target;
   if(el.dataset.plan&&S.plan){const v=num(el.value);if(!isFinite(v)){toast("Enter a number");return}
-    setPath(S.plan,el.dataset.plan,v);if(el.dataset.plan.startsWith("accounts."))S.plan.accounts.updated=todayS();render();savePlan()}
+    setPath(S.plan,el.dataset.plan,v);if(el.dataset.plan.startsWith("accounts.")||el.dataset.plan.startsWith("otherAccts."))S.plan.accounts.updated=todayS();render();savePlan()}
+  if(el.dataset.act==="billfrom"&&S.plan){S.plan.bills[+el.dataset.i].from=el.value;render();savePlan();return}
   if(el.id==="mv-from")S.mvFrom=el.value;if(el.id==="mv-to")S.mvTo=el.value;
 });
 
@@ -779,15 +855,26 @@ document.addEventListener("submit",async e=>{
     const custom=(S.settings.custom||[]).concat([{id,name,shared:!!document.getElementById("cf-shared")?.checked}]);
     try{await saveSettings({custom,history:(S.settings.history||[]).filter(x=>x.from!==from).concat([entry])});toast(`${name} added`);f.reset()}catch(err){fail(err)}}
   if(f.id==="payf"){const k=f.dataset.key,amt=num(val("pf-amt"));if(!(amt>=0)){toast("Enter the amount paid");return}
-    S.plan.paid=[...new Set([...(S.plan.paid||[]),k])];S.plan.paidLog=(S.plan.paidLog||[]).filter(x=>x.key!==k).concat([{key:k,amount:amt,date:val("pf-date")||todayS()}]);
+    const bill=(S.plan.bills||[]).find(x=>k.startsWith(x.name+"|")),acct=bill?billAcct(bill):"chase";acctAdjust(acct,-amt);
+    S.plan.paid=[...new Set([...(S.plan.paid||[]),k])];S.plan.paidLog=(S.plan.paidLog||[]).filter(x=>x.key!==k).concat([{key:k,amount:amt,date:val("pf-date")||todayS(),acct}]);
     const cutoff=ds(dn(todayS())-100).slice(0,7);S.plan.paid=S.plan.paid.filter(x=>(x.split("|")[1]||"")>=cutoff);S.plan.paidLog=S.plan.paidLog.filter(x=>(x.key.split("|")[1]||"")>=cutoff);
     S.payOpen=null;render();savePlan();toast("Marked paid")}
   if(f.id==="incf"){const amt=num(val("if-amt"));if(!(amt>0)){toast("Enter the amount");return}
     const to=val("if-to");const inc={id:Date.now(),src:val("if-src"),amt,date:val("if-date")||todayS(),note:val("if-note").trim().slice(0,80),to:to===""?"":+to};
+    if(document.getElementById("if-bal")?.checked){const P=S.plan,c=compute(),phase=P.postClosing?"post":"pre";let ch=0,sv=0;
+      if(inc.src==="mine"&&inc.to===""){ch=Math.round(billTotal(phase)*12/26*100)/100;sv=amt-ch-POOLS.reduce((s,p)=>s+c[p].budget,0)*2}
+      else if(inc.src==="partner"){sv=amt-(+P.paycheck?.graceBills||0)*12/26}
+      else sv=amt;
+      sv=Math.round(sv*100)/100;acctAdjust("chase",ch);acctAdjust("usaa",sv);inc.applied={chase:ch,usaa:sv}}
     (S.plan.income||(S.plan.income=[])).push(inc);S.plan.income=S.plan.income.slice(-200);
     if(inc.to!==""&&S.plan.goals?.[inc.to]){const g=S.plan.goals[inc.to];g.saved=Math.round(((+g.saved||0)+amt)*100)/100}
     render();savePlan();toast(`Added ${m2(amt)}`)}
   if(f.id==="scf"){const amt=num(val("sc-amt"));if(!(amt>0)){toast("Enter an amount");return}S.scen=runScenario(amt,val("sc-pool"));render()}
+  if(f.id==="goaledit"){const i=+f.dataset.i,g=S.plan.goals[i];const name=val("ge-name").trim();if(!name){toast("Give it a name");return}
+    g.name=name;g.target=num(val("ge-target"))||0;g.monthly=num(val("ge-monthly"))||0;const sv=num(val("ge-saved"));if(isFinite(sv))g.saved=sv;g.when=val("ge-when").trim();
+    S.editGoal=null;render();savePlan();toast("Saved")}
+  if(f.id==="acctf"){const name=val("ac-name").trim(),bal=num(val("ac-bal"));if(!name){toast("Name the account");return}
+    (S.plan.otherAccts||(S.plan.otherAccts=[])).push({name,bal:isFinite(bal)?bal:0});render();savePlan()}
   if(f.id==="labelf"){S.plan.labels={save:val("lb-save").trim()||"Savings",bills:val("lb-bills").trim()||"Bills account"};if(val("lb-pay"))S.plan.payAnchor=val("lb-pay");render();savePlan();toast("Saved")}
   if(f.id==="evf"){
     const name=val("ev-name").trim().slice(0,40),amt=num(val("ev-amt"));
@@ -797,7 +884,7 @@ document.addEventListener("submit",async e=>{
   if(f.id==="billf"){
     const name=val("bf-name").trim(),amt=num(val("bf-amt"));
     if(!name||!isFinite(amt)){toast("Add a name and amount");return}
-    S.plan.bills.push({name,amt,day:val("bf-day").trim(),acct:L().bills,phase:val("bf-phase")});
+    S.plan.bills.push({name,amt,day:val("bf-day").trim(),acct:L().bills,phase:val("bf-phase"),from:"bills",added:todayS()});
     render();savePlan();toast(`Added ${name}`);
   }
   if(f.id==="goalf"){const name=val("gf-name").trim(),amt=num(val("gf-amt"));if(!name){toast("Add a name");return}
@@ -845,7 +932,7 @@ const LOAD={
     S.txns=(chk(t)||[]).map(r=>{const x=mapTx(r),nn=notes[r.id];if(nn){x.note=nn.note||"";x.cat=nn.cat||""}return x})},
   moves:async()=>{S.moves=(chk(await sb.from("wb_moves").select("*").eq("household_id",HID).order("created_at"))||[]).map(mapMv)},
   events:async()=>{S.events=(chk(await sb.from("wb_events").select("*").eq("household_id",HID).order("created_at"))||[]).map(mapEv)},
-  plan:async()=>{if(!S.owner)return;const d=chk(await sb.from("wb_plan").select("data").eq("household_id",HID).maybeSingle());S.plan=d?JSON.parse(JSON.stringify(d.data)):null;S.planMissing=!d},
+  plan:async()=>{if(!S.owner)return;const d=chk(await sb.from("wb_plan").select("data").eq("household_id",HID).maybeSingle());S.plan=d?JSON.parse(JSON.stringify(d.data)):null;S.planMissing=!d;if(S.plan&&S.settings)runAutopay()},
 };
 const TBL={txns:"wb_txns",moves:"wb_moves",events:"wb_events"};
 db={
@@ -950,7 +1037,7 @@ async function start(){
   const hh=chk(await sb.from("households").select("created_by,join_code").eq("id",HID).maybeSingle());S.joinCode=hh?.join_code||"";
   S.owner=hh?.created_by===ME;S.view=S.owner?"aspen":"grace";
   try{await Promise.all(Object.values(LOAD).map(f=>f()))}catch(err){fail(err)}
-  S.ready=true;render();
+  S.ready=true;render();runAutopay();
   if(channel)sb.removeChannel(channel);
   channel=sb.channel("wb-"+HID);
   for(const [t,k] of [["wb_settings","settings"],["wb_txns","txns"],["wb_txn_notes","txns"],["wb_moves","moves"],["wb_events","events"],["wb_plan","plan"]]){
