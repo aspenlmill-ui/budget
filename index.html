@@ -3,11 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#000000">
+<meta name="theme-color" content="#F4F6F5" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#050807" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Budget">
 <link rel="manifest" href="manifest.json">
+<script>try{var t=localStorage.getItem("fb-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-180.png">
 <title>Family Budget</title>
@@ -16,15 +18,14 @@
 <style>
 /* Layout: one narrow phone column; summary tiles first, then the form, then the ledger. Tabs for the owner, single screen for the partner. */
 :root{
-  /* One deliberate look: black like the FB logo, white as the accent, color only for status */
-  --bg:#000000; --surface:#111111; --ink:#F5F5F2; --muted:#9A9A95; --line:#262626;
-  --accent:#F5F5F2; --accent-ink:#000000; --soft:#1C1C1C;
-  --fire:#FF8A3D; --good:#3DDC84; --warn:#FFC53D; --bad:#FF5A4E;
-  --bad-soft:#2A1412; --warn-soft:#2A2310; --good-soft:#0F2519; --fire-soft:#2B1A0E;
+  /* Light by default: white ground, near-black ink, forest green accent. Dark mode swaps the ground to near-black. Status colors are separate from the accent. */
+  --bg:#F4F6F5; --surface:#FFFFFF; --ink:#050807; --muted:#5B6360; --line:#E1E6E3; --accent:#1F5E3B; --accent-ink:#FFFFFF; --soft:#E9EEEB; --fire:#D9661F; --good:#238B4F; --warn:#B7791F; --bad:#C8372D; --bad-soft:#FBEAE8; --warn-soft:#FBF1DE; --good-soft:#E6F4EC; --fire-soft:#FCEBDD;
   --display:"Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
   --body:"Figtree", "Segoe UI", system-ui, -apple-system, sans-serif;
-  --r:14px; color-scheme:dark;
+  --r:14px; color-scheme:light;
 }
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){ --bg:#050807; --surface:#101614; --ink:#FFFFFF; --muted:#9AA39F; --line:#1F2724; --accent:#4E9A6E; --accent-ink:#050807; --soft:#1B2320; --fire:#FF8A3D; --good:#3DDC84; --warn:#F2C14E; --bad:#FF5A4E; --bad-soft:#2A1412; --warn-soft:#2A2310; --good-soft:#0E2319; --fire-soft:#2B1A0E; color-scheme:dark; }}
+:root[data-theme="dark"]{ --bg:#050807; --surface:#101614; --ink:#FFFFFF; --muted:#9AA39F; --line:#1F2724; --accent:#4E9A6E; --accent-ink:#050807; --soft:#1B2320; --fire:#FF8A3D; --good:#3DDC84; --warn:#F2C14E; --bad:#FF5A4E; --bad-soft:#2A1412; --warn-soft:#2A2310; --good-soft:#0E2319; --fire-soft:#2B1A0E; color-scheme:dark; }
 *{box-sizing:border-box}
 body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.45;padding-inline:16px;padding-block:14px 48px}
 .wrap{max-width:560px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
@@ -96,6 +97,10 @@ input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid 
 .bk-bar{grid-column:1/-1;height:4px;border-radius:4px;background:var(--soft);overflow:hidden}.bk-bar i{display:block;height:100%;background:var(--accent)}
 .bk-note{grid-column:1/-1}
 .bk-actions{display:flex;flex-wrap:wrap;gap:6px;padding:0 0 12px}.bk-actions input{max-width:110px;padding:7px 8px;font-size:15px}
+.ledger>div{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-top:1px solid var(--line);align-items:center}
+.ledger>div:first-child{border-top:0}.ledger b{font-family:var(--display);font-variant-numeric:tabular-nums;white-space:nowrap}
+.ledger .strong span,.ledger .strong b{font-weight:700}.ledger .strong b{font-size:17px}
+.ledger .route input{padding:7px 8px;font-size:15px}.ledger .route input:first-child{flex:1;min-width:0}.ledger .route input[data-k="amt"]{width:100px;text-align:right}
 .dot{width:10px;height:10px;border-radius:50%;border:2px solid var(--line);flex-shrink:0}
 .dot.ok{background:var(--good);border-color:var(--good)}
 .dot.late{border-color:var(--bad)}
@@ -146,6 +151,8 @@ html,body{margin:0}
 <div class="toast" id="toast" hidden></div>
 
 <script>
+function setTheme(v){try{localStorage.setItem("fb-theme",v)}catch(_){}if(v==="light"||v==="dark")document.documentElement.setAttribute("data-theme",v);else document.documentElement.removeAttribute("data-theme");S&&(S.theme=v)}
+function getTheme(){try{return localStorage.getItem("fb-theme")||"auto"}catch(_){return "auto"}}
 const BASE=["household","aspen","grace","extras"];
 let POOLS=[...BASE];
 const NAMES={household:"Household",aspen:"Me",grace:"Partner",extras:"Extras"};
@@ -663,6 +670,44 @@ function scenarioCard(){
   </form>`;
 }
 
+
+/* ---------- paycheck planner ---------- */
+function payPlanner(P,c,perCheck,spend,gNet,post){
+  const pay=P.pay||{},rate=+pay.rate||0,baseH=+pay.baseHours||80,ot=pay.otHours??30,normOt=+pay.normalOt||30,takeRaw=+pay.takeHome||75;
+  const take=takeRaw/100,base=rate*baseH,otg=rate*1.5*ot,gross=base+otg,net=gross*take,normNet=(base+rate*1.5*normOt)*take,extra=net-normNet;
+  const routes=P.routing||[],routed=perCheck+spend+routes.reduce((s,r)=>s+(+r.amt||0),0),left=net-routed;
+  const last=[...(P.income||[])].filter(x=>x.src==="mine").sort((a,b)=>b.date<a.date?-1:1)[0];
+  return `<div class="card"><h2>Paycheck planner</h2>
+    <div class="seg" role="group" aria-label="Before or after closing">
+      <button type="button" data-act="phase" data-v="pre" aria-pressed="${!post}">Before closing</button>
+      <button type="button" data-act="phase" data-v="post" aria-pressed="${post}">After closing</button></div>
+    <div class="row" style="margin-top:10px">
+      <label class="f">Hourly rate<input data-plan="pay.rate" inputmode="decimal" value="${esc(pay.rate??"")}"></label>
+      <label class="f">OT hours this check<input data-plan="pay.otHours" inputmode="decimal" value="${esc(ot)}"></label></div>
+    <details><summary class="small muted">More settings</summary><div class="row" style="margin-top:8px">
+      <label class="f">Regular hours<input data-plan="pay.baseHours" inputmode="decimal" value="${esc(baseH)}"></label>
+      <label class="f">Normal OT hours<input data-plan="pay.normalOt" inputmode="decimal" value="${esc(normOt)}"></label>
+      <label class="f">Take-home %<input data-plan="pay.takeHome" inputmode="decimal" value="${esc(takeRaw)}"></label></div>
+      ${last&&gross>0?`<div class="muted small" style="margin-top:6px">Your ${short(dn(last.date))} check was ${m2(last.amt)}. Adjust Take-home % until the estimate matches a real check.</div>`:""}</details>
+    <div class="ledger" style="margin-top:10px">
+      <div><span>Base gross (${esc(baseH)} hrs)</span><b>${m2(base)}</b></div>
+      <div><span>OT gross (${esc(ot)} hrs)</span><b>${m2(otg)}</b></div>
+      <div class="strong"><span>Estimated take-home</span><b>${m2(net)}</b></div>
+      <div><span>Take-home at normal OT (${esc(normOt)} hrs)</span><b>${m2(normNet)}</b></div>
+      <div><span>Extra vs normal OT</span><b style="color:${extra<0?"var(--bad)":"var(--good)"}">${extra<0?"":"+"}${m2(extra)}</b></div>
+    </div>
+    <h2 style="margin-top:16px">Where this check goes</h2>
+    <div class="ledger">
+      <div><span>${esc(L().bills)} bills <span class="muted small">from your bills list</span></span><b>${m2(perCheck)}</b></div>
+      <div><span>Spending reload <span class="muted small">2 weeks of cards</span></span><b>${m2(spend)}</b></div>
+      ${routes.map((r,i)=>`<div class="route"><input data-route="${i}" data-k="name" value="${esc(r.name)}" aria-label="Name"><input data-route="${i}" data-k="amt" inputmode="decimal" value="${esc(r.amt)}" aria-label="Amount"><button class="x" data-act="delroute" data-i="${i}" aria-label="Remove">✕</button></div>`).join("")}
+      <div class="strong"><span>Left for ${esc(L().save)}</span><b style="color:${left<0?"var(--bad)":"var(--good)"}">${m2(left)}</b></div>
+    </div>
+    <button class="btn sm ghost" data-act="addroute" style="margin-top:8px">Add a line</button>
+    <div class="kv small" style="margin-top:8px"><span class="muted">${esc(NAMES.grace)} to savings each check (after her bills)</span><b>${m2(gNet)}</b></div>
+  </div>`;
+}
+
 function planTab(){
   const P=S.plan;
   if(!P)return S.planMissing?`<div class="empty">No plan yet. It holds your bills, account balances, debts and savings goals, and only you can see it.<div style="margin-top:10px"><button class="btn" data-act="blankplan">Start my plan</button></div></div>`:`<div class="empty">Loading your plan…</div>`;
@@ -681,22 +726,7 @@ function planTab(){
     ${incomeCard()}
     ${billsCard()}
 
-    <div class="card"><h2>Paycheck splitter</h2>
-      <div class="seg" role="group" aria-label="Before or after closing">
-        <button type="button" data-act="phase" data-v="pre" aria-pressed="${!post}">Before closing</button>
-        <button type="button" data-act="phase" data-v="post" aria-pressed="${post}">After closing</button></div>
-      <div class="row" style="margin-top:10px">
-        <label class="f">${esc(NAMES.aspen)}'s check<input data-plan="paycheck.aspen" inputmode="decimal" value="${esc(P.paycheck?.aspen??"")}"></label>
-        <label class="f">${esc(NAMES.grace)}'s check<input data-plan="paycheck.grace" inputmode="decimal" value="${esc(P.paycheck?.grace??"")}"></label>
-      </div>
-      <div class="split" style="margin-top:10px">
-        <span>${esc(lb.bills)} for bills</span><b class="num">${m2(perCheck)}</b>
-        <span>Spending (2 weeks)</span><b class="num">${m2(spend)}</b>
-        <span class="tot">To ${esc(lb.save)}</span><b class="num tot" style="color:${toSave<0?"var(--bad)":"var(--good)"}">${m2(toSave)}</b>
-        <span>${esc(NAMES.grace)} to savings (after her bills)</span><b class="num">${m2(gNet)}</b>
-      </div>
-      <div class="muted small" style="margin-top:8px">Based on ${m0(bills)}/month in bills and ${m0(weekly)}/week in spending.</div>
-    </div>
+    ${payPlanner(P,c,perCheck,spend,gNet,post)}
 
     <div class="card"><h2>Debts</h2>
       ${(P.debts||[]).map((d,i)=>`<div class="bill"><div style="min-width:0"><div>${esc(d.name)}</div>${d.note?`<div class="meta">${esc(d.note)}</div>`:""}</div>
@@ -753,6 +783,8 @@ function setupTab(){
     </div>
     ${S.joinCode?`<div class="card"><h2>Invite ${esc(NAMES.grace)}</h2><div class="small muted">${esc(NAMES.grace)} creates an account in this app, picks "Join your partner" and types this code.</div>
       <div class="num" style="font-size:28px;font-weight:700;letter-spacing:.12em;margin-top:8px;user-select:all">${esc(S.joinCode)}</div></div>`:""}
+    <div class="card"><h2>Look</h2><div class="seg" role="group" aria-label="Color mode">
+      ${[["auto","Match phone"],["light","Light"],["dark","Dark"]].map(([k,l])=>`<button type="button" data-act="theme" data-v="${k}" aria-pressed="${getTheme()===k}">${l}</button>`).join("")}</div></div>
     <div class="card"><h2>This phone</h2><div class="small muted">Get what's left every night at 7 PM, and the reload amounts the night before the week resets.</div>
       <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">${pushButton()}<button class="btn ghost" data-act="signout">Sign out</button></div></div>
     ${S.plan?`<form class="card" id="labelf"><h2>Account names</h2>
@@ -799,6 +831,9 @@ document.addEventListener("click",async e=>{
   if(a==="billauto"){const bl=S.plan.bills[+b.dataset.i];bl.auto=b.checked;render();savePlan();return}
   if(a==="splurge"){S.mvFrom=`cushion:${b.dataset.p}`;S.mvTo=`week:${b.dataset.p}`;S.tab="move";render();window.scrollTo(0,0);document.getElementById("mv-amt")?.focus();return}
   if(a==="delacct"){if(!arm(b))return;S.plan.otherAccts.splice(+b.dataset.i,1);render();savePlan();return}
+  if(a==="addroute"){(S.plan.routing||(S.plan.routing=[])).push({name:"New line",amt:0});render();savePlan();return}
+  if(a==="delroute"){S.plan.routing.splice(+b.dataset.i,1);render();savePlan();return}
+  if(a==="theme"){setTheme(b.dataset.v);render();return}
   if(a==="gopen"){const i=+b.dataset.i;S.openGoal=S.openGoal===i?null:i;render();return}
   if(a==="gdone2"){const g=S.plan.goals[+b.dataset.i];g.done=!g.done;S.openGoal=null;render();savePlan();return}
   if(a==="gedit"){S.editGoal=+b.dataset.i;render();return}
@@ -835,6 +870,7 @@ document.addEventListener("change",e=>{
   const el=e.target;
   if(el.dataset.plan&&S.plan){const v=num(el.value);if(!isFinite(v)){toast("Enter a number");return}
     setPath(S.plan,el.dataset.plan,v);if(el.dataset.plan.startsWith("accounts.")||el.dataset.plan.startsWith("otherAccts."))S.plan.accounts.updated=todayS();render();savePlan()}
+  if(el.dataset.route!=null&&S.plan){const r=S.plan.routing[+el.dataset.route];if(el.dataset.k==="amt"){const v=num(el.value);if(!isFinite(v)){toast("Enter a number");return}r.amt=v}else r.name=el.value.trim().slice(0,40)||"Line";render();savePlan();return}
   if(el.dataset.act==="billfrom"&&S.plan){S.plan.bills[+el.dataset.i].from=el.value;render();savePlan();return}
   if(el.id==="mv-from")S.mvFrom=el.value;if(el.id==="mv-to")S.mvTo=el.value;
 });
