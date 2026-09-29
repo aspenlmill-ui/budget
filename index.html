@@ -3,13 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#F4F6F5" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#050807" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#F4F6F5">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Budget">
 <link rel="manifest" href="manifest.json">
-<script>try{var t=localStorage.getItem("fb-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<script>var t="light";try{t=localStorage.getItem("fb-theme")||"light"}catch(e){}if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)</script>
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-180.png">
 <title>Family Budget</title>
@@ -166,7 +165,7 @@ html,body{margin:0}
 
 <script>
 function setTheme(v){try{localStorage.setItem("fb-theme",v)}catch(_){}if(v==="light"||v==="dark")document.documentElement.setAttribute("data-theme",v);else document.documentElement.removeAttribute("data-theme");S&&(S.theme=v)}
-function getTheme(){try{return localStorage.getItem("fb-theme")||"auto"}catch(_){return "auto"}}
+function getTheme(){try{return localStorage.getItem("fb-theme")||"light"}catch(_){return "light"}}
 const BASE=["household","aspen","grace","extras"];
 let POOLS=[...BASE];
 const NAMES={household:"Household",aspen:"Me",grace:"Partner",extras:"Extras"};
@@ -833,7 +832,7 @@ function setupTab(){
     ${S.owner&&S.joinCode?`<div class="card"><h2>Invite ${esc(NAMES.grace)}</h2><div class="small muted">${esc(NAMES.grace)} creates an account in this app, picks "Join your partner" and types this code.</div>
       <div class="num" style="font-size:28px;font-weight:700;letter-spacing:.12em;margin-top:8px;user-select:all">${esc(S.joinCode)}</div></div>`:""}
     <div class="card"><h2>Look</h2><div class="seg" role="group" aria-label="Color mode">
-      ${[["auto","Match phone"],["light","Light"],["dark","Dark"]].map(([k,l])=>`<button type="button" data-act="theme" data-v="${k}" aria-pressed="${getTheme()===k}">${l}</button>`).join("")}</div></div>
+      ${[["light","Light"],["dark","Dark"],["auto","Match phone"]].map(([k,l])=>`<button type="button" data-act="theme" data-v="${k}" aria-pressed="${getTheme()===k}">${l}</button>`).join("")}</div></div>
     <div class="card"><h2>This phone</h2><div class="small muted">Get what's left every night at 7 PM, and the reload amounts the night before the week resets.</div>
       <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">${pushButton()}<button class="btn ghost" data-act="signout">Sign out</button></div></div>
     ${S.plan?`<form class="card" id="labelf"><h2>Account names</h2>
