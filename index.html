@@ -42,8 +42,9 @@ h2{font-size:17px;margin:0 0 10px;text-wrap:balance}
 .small{font-size:13px}
 .label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
 header{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap}
-.tabs{display:flex;gap:6px;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:4px;position:sticky;top:env(safe-area-inset-top,0px);z-index:5}
-.tabs button{flex:1;border:0;background:none;color:var(--muted);font:600 13px var(--body);padding:9px 6px;border-radius:999px;cursor:pointer}
+.tabs{display:flex;gap:4px;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:4px;position:sticky;top:env(safe-area-inset-top,0px);z-index:5;overflow-x:auto;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tabs button{flex:1 0 auto;border:0;background:none;color:var(--muted);font:600 13px var(--body);padding:9px 11px;border-radius:999px;cursor:pointer;white-space:nowrap}
 .tabs button[aria-selected="true"]{background:var(--accent);color:var(--accent-ink)}
 section{display:flex;flex-direction:column;gap:12px}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px}
@@ -81,6 +82,9 @@ input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid 
 .item .grow div{overflow-wrap:anywhere}
 .x{border:0;background:none;color:var(--muted);font:600 12px var(--body);cursor:pointer;padding:6px}
 .x.armed{color:var(--bad)}
+.dot{width:10px;height:10px;border-radius:50%;border:2px solid var(--line);flex-shrink:0}
+.dot.ok{background:var(--good);border-color:var(--good)}
+.dot.late{border-color:var(--bad)}
 .alert{border-radius:var(--r);padding:14px;background:var(--bad-soft);display:flex;flex-direction:column;gap:10px}
 .alert strong{color:var(--bad)}
 .alert .opts{display:flex;flex-wrap:wrap;gap:8px}
@@ -284,16 +288,16 @@ function logForm(pool,grace){
 function txList(list,grace,noEmpty){
   if(!list.length)return noEmpty?"":`<div class="muted small">Nothing logged yet this week.</div>`;
   return `<div class="list">${list.map(t=>`<div class="item">
-    <div class="grow"><div>${esc(t.note||t.cat||"Purchase")}</div>
+    <div class="grow"><div>${esc(t.note||t.cat||(t.mine?"Purchase":`${poolName(t.pool)} purchase`))}</div>
     <div class="muted small">${esc(poolName(t.pool))}${t.cat?" · "+esc(t.cat):""}${t.from==="cushion"?" · from cushion":""} · ${short(dn(t.date))}</div></div>
     <b class="num">${m2(t.amount)}</b>
     ${S.owner||t.mine?`<button class="x" data-act="deltx" data-id="${esc(t.id)}" aria-label="Delete">Delete</button>`:""}</div>`).join("")}</div>`;
 }
 
 function aspenView(){
-  const tabs=[["week","Week"],["special","Special"],["move","Move"],["plan","Plan"],["setup","Setup"]];
+  const tabs=[["week","Week"],["special","Special"],["move","Move"],["vault","Vault"],["plan","Plan"],["setup","Setup"]];
   let body="";
-  if(S.tab==="move")body=moveTab();else if(S.tab==="special")body=specialTab();else if(S.tab==="plan")body=planTab();else if(S.tab==="setup")body=setupTab();else body=weekTab();
+  if(S.tab==="move")body=moveTab();else if(S.tab==="special")body=specialTab();else if(S.tab==="plan")body=planTab();else if(S.tab==="vault")body=vaultTab();else if(S.tab==="setup")body=setupTab();else body=weekTab();
   const c=compute();
   return `<header><div><div class="label">${esc(weekLine(c))}</div><h1 class="brand"><img src="icon.svg" alt="" class="logo">${esc(S.settings?.title||"Family Budget")}</h1></div></header>
   <nav class="tabs" role="tablist">${tabs.map(([k,l])=>`<button role="tab" data-act="tab" data-t="${k}" aria-selected="${S.tab===k}">${l}</button>`).join("")}</nav>
@@ -351,6 +355,7 @@ function moveTab(){
   const opt=(sel)=>eps().map(e=>`<option value="${e}" ${e===sel?"selected":""}>${esc(epLabel(e))}${epAvail(e,c)!==null?` (${m2(epAvail(e,c))})`:""}</option>`).join("");
   return `<section>
     ${rescueBanner(c)}
+    ${scenarioCard()}
     <form class="card" id="movef">
       <h2>Reallocate funds</h2>
       <label class="f">Move from<select id="mv-from">${opt(S.mvFrom||"cushion:aspen")}</select></label>
@@ -403,7 +408,7 @@ function billsCard(){
   for(const r of rows){const d=dayOf(r.b);if(d===null)continue;
     if(!r.paid&&r.due<pay)beforePay+=+r.b.amt||0;
     const nx=dueIn(m===11?y+1:y,(m+1)%12,d);if(nx<pay&&nx>r.due)beforePay+=+r.b.amt||0}
-  const total=rows.reduce((s,r)=>s+(+r.b.amt||0),0),paidAmt=rows.filter(r=>r.paid).reduce((s,r)=>s+(+r.b.amt||0),0);
+  const total=rows.reduce((s,r)=>s+(+r.b.amt||0),0),paidAmt=rows.filter(r=>r.paid).reduce((s,r)=>s+(paidInfo(r.key)?.amount??(+r.b.amt||0)),0);
   const chase=+P.accounts?.chase||0,cover=chase-beforePay;
   const month=t.toLocaleDateString("en-US",{month:"long"});
   return `<div class="card"><h2>${esc(month)} bills</h2>
@@ -414,11 +419,7 @@ function billsCard(){
     <span class="chip ${cover<0?"bad":cover<100?"warn":""}" style="margin-top:8px">${cover<0?`${m2(-cover)} short before payday`:`Covered, ${m2(cover)} to spare`}</span>
     <div class="bar" style="margin-top:12px"><i style="width:${pct(paidAmt,total)}%"></i></div>
     <div class="muted small" style="margin-top:4px">${m0(paidAmt)} of ${m0(total)} paid this month</div>
-    <div class="list" style="margin-top:6px">${rows.map(r=>`<label class="item" style="cursor:pointer;${r.paid?"opacity:.55":""}">
-      <input type="checkbox" data-act="billpaid" data-key="${esc(r.key)}" ${r.paid?"checked":""} style="width:20px;height:20px">
-      <div class="grow"><div>${esc(r.b.name)}</div>
-        <div class="small ${r.late?"":"muted"}" style="${r.late?"color:var(--bad)":""}">${r.paid?"Paid":r.due===null?"No due date":r.late?`Past due ${short(r.due)}`:r.due===today?"Due today":`Due ${short(r.due)}`}</div></div>
-      <b class="num">${m2(r.b.amt)}</b></label>`).join("")}</div>
+    <div class="list" style="margin-top:6px">${rows.map(r=>billRowHtml(r,today)).join("")}</div>
     <details style="margin-top:8px"><summary class="small"><b>Edit bills</b></summary>
       <div class="tbl" style="margin-top:8px">${(P.bills||[]).map((b,i)=>`<div class="bill">
         <div style="min-width:0"><div>${esc(b.name)}</div><div class="meta">${b.day?"Due "+esc(b.day):"No date"}${b.phase!=="both"?` · ${b.phase==="pre"?"until closing":"after closing"}`:""}</div></div>
@@ -437,6 +438,120 @@ function billsCard(){
   </div>`;
 }
 
+
+/* ---------- bills: mark paid with amount + date ---------- */
+function paidInfo(key){return (S.plan?.paidLog||[]).find(x=>x.key===key)}
+function billRowHtml(r,today){
+  const info=paidInfo(r.key);
+  if(S.payOpen===r.key)return `<form class="item payform" id="payf" data-key="${esc(r.key)}" style="flex-wrap:wrap">
+    <div class="grow" style="flex-basis:100%"><b>${esc(r.b.name)}</b></div>
+    <label class="f" style="flex:1;min-width:110px">Amount paid<input id="pf-amt" inputmode="decimal" value="${esc(r.b.amt)}"></label>
+    <label class="f" style="flex:1;min-width:130px">Date<input type="date" id="pf-date" value="${todayS()}"></label>
+    <div class="row" style="flex-basis:100%"><button class="btn" type="submit">Save as paid</button><button class="btn ghost" type="button" data-act="paycancel">Cancel</button></div></form>`;
+  const when=r.paid?`Paid${info?.date?" "+short(dn(info.date)):""}${info&&Math.abs(info.amount-(+r.b.amt||0))>0.004?` · ${m2(info.amount)}`:""}`
+    :r.due===null?"No due date":r.late?`Past due ${short(r.due)}`:r.due===today?"Due today":`Due ${short(r.due)}`;
+  return `<div class="item">
+    <span class="dot ${r.paid?"ok":r.late?"late":""}" aria-hidden="true"></span>
+    <div class="grow"><div style="${r.paid?"color:var(--muted)":""}">${esc(r.b.name)}</div>
+      <div class="small ${r.late&&!r.paid?"":"muted"}" style="${r.late&&!r.paid?"color:var(--bad)":""}">${when}</div></div>
+    <b class="num" style="${r.paid?"color:var(--muted)":""}">${m2(r.b.amt)}</b>
+    ${r.paid?`<button class="x" data-act="billundo" data-key="${esc(r.key)}">Undo</button>`
+      :`<button class="btn sm" data-act="payopen" data-key="${esc(r.key)}">Paid</button>`}
+  </div>`;
+}
+
+/* ---------- income: paychecks and extra money ---------- */
+function incomeSources(){return [["mine",`${NAMES.aspen}'s paycheck`],["partner",`${NAMES.grace}'s pay`],["drill","Drill pay"],["ot","Overtime / bonus"],["reimb","Reimbursement"],["other","Other"]]}
+function incomeCard(){
+  const P=S.plan,list=[...(P.income||[])].sort((a,b)=>b.date<a.date?-1:1);
+  const t=new Date(),mk=`${t.getFullYear()}-${pad(t.getMonth()+1)}`;
+  const month=list.filter(x=>String(x.date).startsWith(mk)),mtot=month.reduce((s,x)=>s+(+x.amt||0),0);
+  const src=Object.fromEntries(incomeSources());
+  const goals=P.goals||[];
+  const lastCheck=list.find(x=>x.src==="mine");
+  let split="";
+  if(lastCheck){const c=compute(),phase=P.postClosing?"post":"pre",perCheck=billTotal(phase)*12/26,spend=POOLS.reduce((s,p)=>s+c[p].budget,0)*2,rest=lastCheck.amt-perCheck-spend;
+    split=`<div class="split" style="margin-top:10px"><span class="label" style="grid-column:1/-1">Split for your ${short(dn(lastCheck.date))} check (${m2(lastCheck.amt)})</span>
+      <span>${esc(L().bills)} for bills</span><b class="num">${m2(perCheck)}</b>
+      <span>Spending reload (2 weeks)</span><b class="num">${m2(spend)}</b>
+      <span class="tot">To ${esc(L().save)}</span><b class="num tot" style="color:${rest<0?"var(--bad)":"var(--good)"}">${m2(rest)}</b></div>`}
+  return `<div class="card"><h2>Paychecks and extra money</h2>
+    <form class="form" id="incf">
+      <div class="row"><label class="f">What came in<select id="if-src">${incomeSources().map(([k,l])=>`<option value="${k}">${esc(l)}</option>`).join("")}</select></label>
+        <label class="f">Amount<input id="if-amt" inputmode="decimal" placeholder="0.00"></label></div>
+      <div class="row"><label class="f">Date<input type="date" id="if-date" value="${todayS()}"></label>
+        <label class="f">Put it toward<select id="if-to"><option value="">Normal split</option>${goals.map((g,i)=>g.done?"":`<option value="${i}">${esc(g.name)}</option>`).join("")}</select></label></div>
+      <label class="f">Note<input id="if-note" placeholder="Sept 25 check, 42 OT hours"></label>
+      <button class="btn" type="submit">Add income</button>
+    </form>
+    ${split}
+    <div class="kv" style="margin-top:8px"><span>${esc(t.toLocaleDateString("en-US",{month:"long"}))} so far</span><b>${m2(mtot)}</b></div>
+    ${list.length?`<details><summary class="small"><b>Income history (${list.length})</b></summary><div class="list">${list.slice(0,30).map(x=>`<div class="item"><div class="grow"><div>${esc(src[x.src]||"Income")}</div>
+      <div class="muted small">${short(dn(x.date))}${x.note?" · "+esc(x.note):""}${x.to!==""&&x.to!=null&&goals[x.to]?` · to ${esc(goals[x.to].name)}`:""}</div></div>
+      <b class="num">${m2(x.amt)}</b><button class="x" data-act="delinc" data-id="${esc(x.id)}">Delete</button></div>`).join("")}</div></details>`:""}
+  </div>`;
+}
+
+/* ---------- money vault ---------- */
+function vaultTab(){
+  const P=S.plan;if(!P)return planTab();
+  const lb=L(),bal=+P.accounts?.usaa||0,floor=+P.floor||0,goals=P.goals||[];
+  const inBuckets=goals.filter(g=>!g.done).reduce((s,g)=>s+(+g.saved||0),0),free=bal-inBuckets,above=bal-floor;
+  return `<section>
+    <div class="card"><h2>Money Vault</h2>
+      <div class="small muted">Buckets are jobs for the money already sitting in ${esc(lb.save)}. They don't move money between accounts; they tell you what each dollar is for.</div>
+      <div class="row" style="margin-top:10px">
+        <label class="f">${esc(lb.save)} balance<input data-plan="accounts.usaa" inputmode="decimal" value="${esc(P.accounts?.usaa??"")}"></label>
+        <label class="f">${esc(lb.bills)} balance<input data-plan="accounts.chase" inputmode="decimal" value="${esc(P.accounts?.chase??"")}"></label>
+        <label class="f">Protected floor<input data-plan="floor" inputmode="decimal" value="${esc(P.floor??"")}"></label></div>
+      <div class="split" style="margin-top:10px">
+        <span>In buckets</span><b class="num">${m2(inBuckets)}</b>
+        <span>Not assigned yet</span><b class="num" style="color:${free<0?"var(--bad)":"inherit"}">${m2(free)}</b>
+        <span class="tot">Above the floor</span><b class="num tot">${m2(above)}</b></div>
+      <span class="chip ${above<0?"bad":above<500?"warn":""}" style="margin-top:8px">${above<0?"Below the floor. Pause extra goals until it refills.":above<500?"Close to the floor":"Floor is safe"}</span>
+      ${free<0?`<div class="chip bad" style="margin-top:6px">Buckets add up to more than the balance. Take some back out.</div>`:""}
+      <div class="muted small" style="margin-top:6px">Update balances when you check the bank apps${P.accounts?.updated?` · last updated ${esc(P.accounts.updated)}`:""}.</div>
+    </div>
+    <div class="card"><h2>Buckets and goals</h2>
+      <div class="list">${goals.map((g,i)=>`<div class="goal ${g.done?"done":""}">
+        <div class="top"><label class="check"><input type="checkbox" data-act="gdone" data-i="${i}" ${g.done?"checked":""}> <span>${esc(g.name)}</span></label>
+          <span class="num small">${m0(g.saved)}${+g.target?` / ${m0(g.target)}`:""}</span></div>
+        ${g.when?`<div class="muted small">${esc(g.when)}</div>`:""}
+        ${+g.target?`<div class="bar"><i style="width:${pct(g.saved,g.target)}%"></i></div>`:""}
+        ${g.done?"":`<div class="add"><input id="gadd-${i}" inputmode="decimal" placeholder="Amount"><button class="btn sm ghost" data-act="gadd" data-i="${i}">Add</button><button class="btn sm ghost" data-act="gtake" data-i="${i}">Take out</button></div>`}
+      </div>`).join("")}</div>
+      <form class="form" id="goalf" style="margin-top:10px"><div class="row">
+        <label class="f">New bucket<input id="gf-name" placeholder="Car repairs"></label>
+        <label class="f">Goal (optional)<input id="gf-amt" inputmode="decimal" placeholder="0"></label></div>
+        <button class="btn ghost" type="submit">Add bucket</button></form>
+    </div>
+  </section>`;
+}
+
+/* ---------- what if I spend ---------- */
+function runScenario(amt,pool){
+  const c=compute(),steps=[];let need=amt;
+  const take=(label,avail,ep)=>{if(need<=0.004||!(avail>0))return;const x=Math.min(need,avail);steps.push({label,x,ep});need-=x};
+  if(pool!=="none"){take(`${NAMES[pool]} this week`,c[pool].left,null);take(`${NAMES[pool]}'s cushion`,c[pool].cushion,`cushion:${pool}`)}
+  if(pool!=="extras"){take(`${NAMES.extras} this week`,c.extras.left,"week:extras");take(`${NAMES.extras} cushion`,c.extras.cushion,"cushion:extras")}
+  for(const q of POOLS)if(q!==pool&&q!=="extras")take(`${NAMES[q]}'s cushion`,c[q].cushion,`cushion:${q}`);
+  if(S.plan){const P=S.plan,bal=+P.accounts?.usaa||0,inB=(P.goals||[]).filter(g=>!g.done).reduce((s,g)=>s+(+g.saved||0),0);
+    take(`${L().save}, unassigned and above the floor`,Math.max(0,bal-Math.max(+P.floor||0,0)-inB),"usaa")}
+  return {steps,short:Math.max(0,Math.round(need*100)/100),pool,amt};
+}
+function scenarioCard(){
+  const r=S.scen;
+  return `<form class="card" id="scf"><h2>What if I spend…?</h2>
+    <div class="row"><label class="f">Amount<input id="sc-amt" inputmode="decimal" placeholder="0.00" value="${r?r.amt:""}"></label>
+      <label class="f">From<select id="sc-pool">${POOLS.map(p=>`<option value="${p}" ${r&&r.pool===p?"selected":""}>${esc(NAMES[p])}</option>`).join("")}<option value="none" ${r&&r.pool==="none"?"selected":""}>None of these</option></select></label></div>
+    <button class="btn ghost" type="submit">Check it</button>
+    ${r?`<div class="list" style="margin-top:8px">${r.steps.map(s=>`<div class="kv"><span>${esc(s.label)}</span><b>${m2(s.x)}</b></div>`).join("")}</div>
+      ${r.short>0?`<div class="alert"><strong>${m2(r.short)} more than you have free.</strong><div class="small">That would come out of bucket money or go below the protected floor. Wait for the next reload or skip it.</div></div>`
+        :`<span class="chip">You can cover it without touching protected money.</span>
+          ${r.pool!=="none"&&r.steps.some(s=>s.ep)?`<button class="btn" type="button" data-act="scapply" style="margin-top:8px">Move the money like this</button>`:""}`}`:""}
+  </form>`;
+}
+
 function planTab(){
   const P=S.plan;
   if(!P)return S.planMissing?`<div class="empty">No plan yet. It holds your bills, account balances, debts and savings goals, and only you can see it.<div style="margin-top:10px"><button class="btn" data-act="blankplan">Start my plan</button></div></div>`:`<div class="empty">Loading your plan…</div>`;
@@ -452,33 +567,8 @@ function planTab(){
   const above=(+P.accounts?.usaa||0)-(+P.floor||0);
   const goals=P.goals||[];
   return `<section>
+    ${incomeCard()}
     ${billsCard()}
-
-    <div class="card"><h2>Protected money</h2>
-      <div class="row">
-        <label class="f">${esc(lb.save)}<input data-plan="accounts.usaa" inputmode="decimal" value="${esc(P.accounts?.usaa??"")}"></label>
-        <label class="f">${esc(lb.bills)}<input data-plan="accounts.chase" inputmode="decimal" value="${esc(P.accounts?.chase??"")}"></label>
-        <label class="f">Floor<input data-plan="floor" inputmode="decimal" value="${esc(P.floor??"")}"></label>
-      </div>
-      <div class="kv"><span>${esc(lb.save)} above the floor</span><b>${m2(above)}</b></div>
-      <span class="chip ${above<0?"bad":above<500?"warn":""}">${above<0?"Below the floor. Pause extra goals until it refills.":above<500?"Close to the floor":"Floor is safe"}</span>
-      <div class="muted small">Update balances when you check the bank apps${P.accounts?.updated?` · last updated ${esc(P.accounts.updated)}`:""}.</div>
-    </div>
-
-    <div class="card"><h2>The path</h2>
-      ${goals.length?"":`<div class="muted small">No goals yet.</div>`}
-      <div class="list">${goals.map((g,i)=>`<div class="goal ${g.done?"done":""}">
-        <div class="top"><label class="check"><input type="checkbox" data-act="gdone" data-i="${i}" ${g.done?"checked":""}> <span>${esc(g.name)}</span></label>
-          <span class="num small">${m0(g.saved)} / ${m0(g.target)}</span></div>
-        ${g.when?`<div class="muted small">${esc(g.when)}</div>`:""}
-        <div class="bar"><i style="width:${pct(g.saved,g.target)}%"></i></div>
-        ${g.done?"":`<div class="add"><input id="gadd-${i}" inputmode="decimal" placeholder="Amount"><button class="btn sm ghost" data-act="gadd" data-i="${i}">Add saved</button></div>`}
-      </div>`).join("")}</div>
-      <form class="form" id="goalf" style="margin-top:10px"><div class="row">
-        <label class="f">New goal<input id="gf-name" placeholder="Emergency fund"></label>
-        <label class="f">Target<input id="gf-amt" inputmode="decimal" placeholder="0"></label></div>
-        <button class="btn ghost" type="submit">Add goal</button></form>
-    </div>
 
     <div class="card"><h2>Paycheck splitter</h2>
       <div class="seg" role="group" aria-label="Before or after closing">
@@ -550,6 +640,8 @@ function setupTab(){
       <div class="small">When ${esc(NAMES.grace)} opens this page she sees only her weekly number, the ${esc(NAMES.household.toLowerCase())} number, her saved money, open special budgets and a place to log purchases. Bills, balances, debts and the plan are stored so only you can read them.</div>
       <button class="btn ghost" data-act="view" data-v="grace" style="margin-top:10px">Preview ${esc(NAMES.grace)}'s view</button>
     </div>
+    ${S.joinCode?`<div class="card"><h2>Invite ${esc(NAMES.grace)}</h2><div class="small muted">${esc(NAMES.grace)} creates an account in this app, picks "Join your partner" and types this code.</div>
+      <div class="num" style="font-size:28px;font-weight:700;letter-spacing:.12em;margin-top:8px;user-select:all">${esc(S.joinCode)}</div></div>`:""}
     <div class="card"><h2>This phone</h2><div class="small muted">Get what's left every night at 7 PM, and the reload amounts the night before the week resets.</div>
       <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">${pushButton()}<button class="btn ghost" data-act="signout">Sign out</button></div></div>
     ${S.plan?`<form class="card" id="labelf"><h2>Account names</h2>
@@ -587,6 +679,15 @@ document.addEventListener("click",async e=>{
     if(a==="delbill"){S.plan.bills.splice(+b.dataset.i,1);render();savePlan()}
     if(a==="deldebt"){S.plan.debts.splice(+b.dataset.i,1);render();savePlan()}
     return}
+  if(a==="payopen"){S.payOpen=b.dataset.key;render();document.getElementById("pf-amt")?.focus();return}
+  if(a==="paycancel"){S.payOpen=null;render();return}
+  if(a==="billundo"){const k=b.dataset.key;S.plan.paid=(S.plan.paid||[]).filter(x=>x!==k);S.plan.paidLog=(S.plan.paidLog||[]).filter(x=>x.key!==k);render();savePlan();return}
+  if(a==="delinc"){if(!arm(b))return;const inc=(S.plan.income||[]).find(x=>String(x.id)===b.dataset.id);if(!inc)return;
+    if(inc.to!==""&&inc.to!=null&&S.plan.goals?.[inc.to]){const g=S.plan.goals[inc.to];g.saved=Math.round(((+g.saved||0)-inc.amt)*100)/100}
+    S.plan.income=S.plan.income.filter(x=>x!==inc);render();savePlan();return}
+  if(a==="gtake"){const i=+b.dataset.i;const v=num(document.getElementById("gadd-"+i).value);if(!(v>0)){toast("Enter an amount first");return}
+    const g=S.plan.goals[i];g.saved=Math.round(((+g.saved||0)-v)*100)/100;render();savePlan();toast(`${m0(v)} taken out of ${g.name}`);return}
+  if(a==="scapply"){const r=S.scen;if(!r)return;for(const s of r.steps)if(s.ep)await addMove(s.ep,`week:${r.pool}`,s.x,"What-if: cover a purchase");S.scen=null;render();return}
   if(a==="billpaid"){const k=b.dataset.key,set=new Set(S.plan.paid||[]);if(b.checked)set.add(k);else set.delete(k);
     const cutoff=ds(dn(todayS())-100).slice(0,7);S.plan.paid=[...set].filter(x=>(x.split("|")[1]||"")>=cutoff);render();savePlan();return}
   if(a==="evclose"||a==="evopen"){if(a==="evclose"&&!arm(b,"Tap again to close"))return;
@@ -647,6 +748,16 @@ document.addEventListener("submit",async e=>{
     const id="c"+Date.now().toString(36);const c=compute(),from=ds(c.cw),entry={from};for(const p of POOLS)entry[p]=c[p].budget;entry[id]=amt;
     const custom=(S.settings.custom||[]).concat([{id,name,shared:!!document.getElementById("cf-shared")?.checked}]);
     try{await saveSettings({custom,history:(S.settings.history||[]).filter(x=>x.from!==from).concat([entry])});toast(`${name} added`);f.reset()}catch(err){fail(err)}}
+  if(f.id==="payf"){const k=f.dataset.key,amt=num(val("pf-amt"));if(!(amt>=0)){toast("Enter the amount paid");return}
+    S.plan.paid=[...new Set([...(S.plan.paid||[]),k])];S.plan.paidLog=(S.plan.paidLog||[]).filter(x=>x.key!==k).concat([{key:k,amount:amt,date:val("pf-date")||todayS()}]);
+    const cutoff=ds(dn(todayS())-100).slice(0,7);S.plan.paid=S.plan.paid.filter(x=>(x.split("|")[1]||"")>=cutoff);S.plan.paidLog=S.plan.paidLog.filter(x=>(x.key.split("|")[1]||"")>=cutoff);
+    S.payOpen=null;render();savePlan();toast("Marked paid")}
+  if(f.id==="incf"){const amt=num(val("if-amt"));if(!(amt>0)){toast("Enter the amount");return}
+    const to=val("if-to");const inc={id:Date.now(),src:val("if-src"),amt,date:val("if-date")||todayS(),note:val("if-note").trim().slice(0,80),to:to===""?"":+to};
+    (S.plan.income||(S.plan.income=[])).push(inc);S.plan.income=S.plan.income.slice(-200);
+    if(inc.to!==""&&S.plan.goals?.[inc.to]){const g=S.plan.goals[inc.to];g.saved=Math.round(((+g.saved||0)+amt)*100)/100}
+    render();savePlan();toast(`Added ${m2(amt)}`)}
+  if(f.id==="scf"){const amt=num(val("sc-amt"));if(!(amt>0)){toast("Enter an amount");return}S.scen=runScenario(amt,val("sc-pool"));render()}
   if(f.id==="labelf"){S.plan.labels={save:val("lb-save").trim()||"Savings",bills:val("lb-bills").trim()||"Bills account"};if(val("lb-pay"))S.plan.payAnchor=val("lb-pay");render();savePlan();toast("Saved")}
   if(f.id==="evf"){
     const name=val("ev-name").trim().slice(0,40),amt=num(val("ev-amt"));
@@ -659,8 +770,8 @@ document.addEventListener("submit",async e=>{
     S.plan.bills.push({name,amt,day:val("bf-day").trim(),acct:L().bills,phase:val("bf-phase")});
     render();savePlan();toast(`Added ${name}`);
   }
-  if(f.id==="goalf"){const name=val("gf-name").trim(),amt=num(val("gf-amt"));if(!name||!(amt>0)){toast("Add a name and target");return}
-    (S.plan.goals||(S.plan.goals=[])).push({name,target:amt,saved:0,done:false});render();savePlan()}
+  if(f.id==="goalf"){const name=val("gf-name").trim(),amt=num(val("gf-amt"));if(!name){toast("Add a name");return}
+    (S.plan.goals||(S.plan.goals=[])).push({name,target:isFinite(amt)?amt:0,saved:0,done:false});render();savePlan()}
   if(f.id==="debtf"){const name=val("df-name").trim(),amt=num(val("df-amt"));if(!name||!isFinite(amt)){toast("Add a name and balance");return}
     (S.plan.debts||(S.plan.debts=[])).push({name,bal:amt});render();savePlan()}
 });
@@ -699,7 +810,9 @@ const mapMv=r=>({id:r.id,from:r.from_ep,to:r.to_ep,amount:+r.amount,reason:r.rea
 const mapEv=r=>({id:r.id,name:r.name,budget:+r.budget,active:r.active,created:Date.parse(r.created_at)});
 const LOAD={
   settings:async()=>{const d=chk(await sb.from("wb_settings").select("data").eq("household_id",HID).maybeSingle());S.settings=d?d.data:null;S.settingsLoaded=true;applyNames()},
-  txns:async()=>{S.txns=(chk(await sb.from("wb_txns").select("*").eq("household_id",HID).order("created_at"))||[]).map(mapTx)},
+  txns:async()=>{const [t,n]=await Promise.all([sb.from("wb_txns").select("*").eq("household_id",HID).order("created_at"),sb.from("wb_txn_notes").select("txn_id,note,cat").eq("household_id",HID)]);
+    const notes=Object.fromEntries((chk(n)||[]).map(x=>[x.txn_id,x]));
+    S.txns=(chk(t)||[]).map(r=>{const x=mapTx(r),nn=notes[r.id];if(nn){x.note=nn.note||"";x.cat=nn.cat||""}return x})},
   moves:async()=>{S.moves=(chk(await sb.from("wb_moves").select("*").eq("household_id",HID).order("created_at"))||[]).map(mapMv)},
   events:async()=>{S.events=(chk(await sb.from("wb_events").select("*").eq("household_id",HID).order("created_at"))||[]).map(mapEv)},
   plan:async()=>{if(!S.owner)return;const d=chk(await sb.from("wb_plan").select("data").eq("household_id",HID).maybeSingle());S.plan=d?JSON.parse(JSON.stringify(d.data)):null;S.planMissing=!d},
@@ -713,7 +826,8 @@ db={
       else if(c==="private"){chk(await sb.from("wb_plan").upsert({household_id:HID,data:body,updated_at:now}))}},
     async update(patch){chk(await sb.from(TBL[c]).update(patch).eq("id",id));await LOAD[c]();render()}}},
   collection(c){return{async add(d){
-    if(c==="txns")chk(await sb.from("wb_txns").insert({household_id:HID,pool:d.pool,amount:d.amount,note:d.note||null,cat:d.cat||null,src:d.from==="cushion"?"cushion":"week",date:d.date}));
+    if(c==="txns"){const row=chk(await sb.from("wb_txns").insert({household_id:HID,pool:d.pool,amount:d.amount,src:d.from==="cushion"?"cushion":"week",date:d.date}).select("id").single());
+      if(d.note||d.cat)chk(await sb.from("wb_txn_notes").insert({txn_id:row.id,household_id:HID,shared:!["aspen","grace"].includes(d.pool),note:d.note||null,cat:d.cat||null}))}
     if(c==="moves")chk(await sb.from("wb_moves").insert({household_id:HID,from_ep:d.from,to_ep:d.to,amount:d.amount,reason:d.reason||null,date:d.date}));
     if(c==="events")chk(await sb.from("wb_events").insert({household_id:HID,name:d.name,budget:d.budget,active:true}));
     await LOAD[c]();render()}}}
@@ -725,12 +839,29 @@ function loginView(mode){
   if(mode==="recover")return `<div class="login">${logo}<h1>Set a new password</h1>
     <form class="card" id="newpwf"><label class="f">New password<input type="password" id="np" autocomplete="new-password" minlength="6" required></label>
     <button class="btn" type="submit">Save password</button></form></div>`;
-  return `<div class="login">${logo}<h1>Family Budget</h1><div class="muted">Sign in with the same email and password as your old spending app.</div>
+  if(mode==="signup")return `<div class="login">${logo}<h1>Create an account</h1><div class="muted">Your budget is private to your household.</div>
+    <form class="card" id="signupf">
+      <label class="f">Email<input type="email" id="se" autocomplete="username" required></label>
+      <label class="f">Password (6+ characters)<input type="password" id="sp" autocomplete="new-password" minlength="6" required></label>
+      <button class="btn" type="submit">Create account</button>
+      <button class="btn ghost" type="button" data-act="tologin">I already have an account</button>
+    </form></div>`;
+  if(mode==="household")return `<div class="login">${logo}<h1>Set up your household</h1>
+    <form class="card" id="hhcreatef"><h2>Start a new budget</h2><div class="small muted">You'll manage the budget. Your partner joins with a code.</div>
+      <label class="f">Your first name<input id="hc-me" autocomplete="given-name"></label>
+      <button class="btn" type="submit">Start my budget</button></form>
+    <form class="card" id="hhjoinf"><h2>Join your partner</h2>
+      <label class="f">Join code<input id="hj-code" autocapitalize="characters" placeholder="8 letters and numbers"></label>
+      <label class="f">Your first name<input id="hj-me" autocomplete="given-name"></label>
+      <button class="btn ghost" type="submit">Join</button></form>
+    <button class="btn ghost" data-act="signout">Sign out</button></div>`;
+  return `<div class="login">${logo}<h1>Family Budget</h1><div class="muted">Sign in with your email and password.</div>
     <form class="card" id="loginf">
       <label class="f">Email<input type="email" id="le" autocomplete="username" required></label>
       <label class="f">Password<input type="password" id="lp" autocomplete="current-password"></label>
       <button class="btn" type="submit">Sign in</button>
       <button class="btn ghost" type="button" data-act="forgot">Forgot password? Email me a reset link</button>
+      <button class="btn ghost" type="button" data-act="tosignup">New here? Create an account</button>
     </form></div>`;
 }
 function showLogin(mode){S.ready=false;document.getElementById("app").innerHTML=loginView(mode)}
@@ -740,6 +871,13 @@ document.addEventListener("submit",async e=>{
   if(f.id==="loginf"){e.preventDefault();const email=val("le").trim(),password=val("lp");
     if(!password){toast("Enter your password, or tap Forgot password");return}
     const r=await sb.auth.signInWithPassword({email,password});if(r.error){toast("That email and password didn't match. Try again or reset your password.");return}start()}
+  if(f.id==="signupf"){e.preventDefault();const r=await sb.auth.signUp({email:val("se").trim(),password:val("sp"),options:{emailRedirectTo:location.origin+location.pathname}});
+    if(r.error){toast(r.error.message);return}
+    if(!r.data.session){toast("Check your email to confirm your account, then sign in");showLogin();return}start()}
+  if(f.id==="hhcreatef"){e.preventDefault();const r=await sb.rpc("create_my_household",{household_name:"Our Household",my_display_name:val("hc-me").trim()||null});
+    if(r.error){toast(r.error.message);return}start()}
+  if(f.id==="hhjoinf"){e.preventDefault();const r=await sb.rpc("join_my_household",{household_code:val("hj-code").trim(),my_display_name:val("hj-me").trim()||null});
+    if(r.error){toast(/Invalid/.test(r.error.message)?"That code didn't match. Check it with your partner.":r.error.message);return}start()}
   if(f.id==="newpwf"){e.preventDefault();const r=await sb.auth.updateUser({password:val("np")});
     if(r.error){toast(r.error.message);return}toast("Password saved");history.replaceState(null,"",location.pathname);start()}
 });
@@ -748,6 +886,8 @@ document.addEventListener("click",async e=>{
   if(b.dataset.act==="forgot"){const email=val("le").trim();if(!email){toast("Type your email first");return}
     const r=await sb.auth.resetPasswordForEmail(email,{redirectTo:location.origin+location.pathname});
     toast(r.error?"Couldn't send the email. Try again in a minute.":"Check your email for the reset link")}
+  if(b.dataset.act==="tosignup"){showLogin("signup");return}
+  if(b.dataset.act==="tologin"){showLogin();return}
   if(b.dataset.act==="signout"){await sb.auth.signOut();if(channel)sb.removeChannel(channel);showLogin()}
   if(b.dataset.act==="push")enablePush(b);
 });
@@ -775,15 +915,15 @@ async function start(){
   if(!session){showLogin();return}
   ME=session.user.id;
   const mem=chk(await sb.from("household_members").select("household_id").eq("user_id",ME).maybeSingle());
-  if(!mem){document.getElementById("app").innerHTML=`<div class="login"><img src="icon.svg" alt="" class="logo-big"><h1>Almost there</h1><div class="empty">This account isn't part of a household yet.</div><button class="btn ghost" data-act="signout">Sign out</button></div>`;return}
+  if(!mem){showLogin("household");return}
   HID=mem.household_id;
-  const hh=chk(await sb.from("households").select("created_by").eq("id",HID).maybeSingle());
+  const hh=chk(await sb.from("households").select("created_by,join_code").eq("id",HID).maybeSingle());S.joinCode=hh?.join_code||"";
   S.owner=hh?.created_by===ME;S.view=S.owner?"aspen":"grace";
   try{await Promise.all(Object.values(LOAD).map(f=>f()))}catch(err){fail(err)}
   S.ready=true;render();
   if(channel)sb.removeChannel(channel);
   channel=sb.channel("wb-"+HID);
-  for(const [t,k] of [["wb_settings","settings"],["wb_txns","txns"],["wb_moves","moves"],["wb_events","events"],["wb_plan","plan"]]){
+  for(const [t,k] of [["wb_settings","settings"],["wb_txns","txns"],["wb_txn_notes","txns"],["wb_moves","moves"],["wb_events","events"],["wb_plan","plan"]]){
     if(k==="plan"&&!S.owner)continue;
     channel.on("postgres_changes",{event:"*",schema:"public",table:t,filter:`household_id=eq.${HID}`},()=>{LOAD[k]().then(render).catch(()=>{})});
   }
