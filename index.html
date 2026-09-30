@@ -236,7 +236,7 @@ function compute(){
     for(const w of L){if(w<cw)c+=budgetFor(p,w)+(r.adj[w]||0)-(r.spent[w]||0)}
     const budget=budgetFor(p,cw),alloc=budget+(r.adj[cw]||0),spent=r.spent[cw]||0;
     out[p]={budget,alloc,spent,left:alloc-spent,cushion:c,nextAdj:r.adj[stepFrom(cw,fs)]||0}}
-  return out;
+  out.R=R;out.L=L;return out;
 }
 
 function toast(msg){const t=document.getElementById("toast");t.textContent=msg;t.hidden=false;clearTimeout(toast.h);toast.h=setTimeout(()=>t.hidden=true,2600)}
@@ -403,7 +403,7 @@ function rescueOptions(c,p){
   if(p!=="extras"){add("week:extras",`${NAMES.extras} ${PER().this}`,c.extras.left,"That's what Extras is for.",2);add("cushion:extras",`${NAMES.extras} splurge`,c.extras.cushion,"Saved odds-and-ends money.",2)}
   for(const q of POOLS)if(q!==p&&q!=="extras")add(`cushion:${q}`,`${NAMES[q]}'s splurge`,c[q].cushion,`Uses ${NAMES[q]}'s saved leftovers.`,3);
   for(const q of POOLS)if(q!==p&&q!=="extras"){const room=c[q].left-Math.max(0,c[q].alloc*(1-f));add(`week:${q}`,`${NAMES[q]} ${PER().this}`,Math.max(0,room),`${NAMES[q]} is under pace, so there's room.`,4)}
-  if(S.plan){const P=S.plan,bal=+P.accounts?.usaa||0,inB=(P.goals||[]).filter(g=>!g.done).reduce((s,g)=>s+(+g.saved||0),0),free=Math.max(0,bal-Math.max(+P.floor||0,0)-inB);
+  if(S.plan){const P=S.plan,bal=acctBal("usaa"),inB=(P.goals||[]).filter(g=>!g.done).reduce((s,g)=>s+(+g.saved||0),0),free=Math.max(0,bal-Math.max(+P.floor||0,0)-inB);
     add("usaa",`${L().save} (unassigned savings)`,free,"Real savings. Use it if nothing above covers it.",5)}
   opts.sort((a,b)=>a.tier-b.tier||b.amt-a.amt);
   return {need,opts};
@@ -451,7 +451,7 @@ function onboardSteps(){
   const push=typeof Notification!=="undefined"&&Notification.permission==="granted";
   return [
     ["bills","Add your bills","Bills tab → Add a bill. Say if it varies, if it autopays, and when it's due.",(P.bills||[]).length>0,"bills"],
-    ["balances","Enter your bank balances","Vault tab → Accounts. Type what's in each account today.",(+P.accounts?.usaa||0)+(+P.accounts?.chase||0)>0,"vault"],
+    ["balances","Enter your bank balances","Vault tab → Accounts. Type what's in each account today.",(acctBal("usaa"))+(acctBal("chase"))>0,"vault"],
     ["deposit","Set where paychecks go","Plan tab → Where paychecks go. Pick each paycheck's account and any automatic amounts.",!!P.deposit,"plan"],
     ["buckets","Set what you're saving for","Vault tab → What we're saving for. Rename or add buckets.",!!ob.buckets,"vault"],
     ["partner",`Invite ${NAMES.grace}`,`Setup tab shows your join code. ${NAMES.grace} makes an account and picks "Join your partner".`,!!ob.partner,"setup"],
@@ -624,7 +624,7 @@ function billsCard(){
   const beforePay=dueBeforePayday("chase"),fromSav=dueBeforePayday("usaa");
   const total=rows.reduce((s,r)=>s+billAmt(r.b,r.key),0),paidAmt=rows.filter(r=>r.paid).reduce((s,r)=>s+(paidInfo(r.key)?.amount??billAmt(r.b,r.key)),0);
   const needAmt=rows.filter(r=>isVar(r.b)&&!r.paid&&S.plan?.varAmt?.[r.key]==null);
-  const chase=+P.accounts?.chase||0,cover=chase-beforePay;
+  const chase=acctBal("chase"),cover=chase-beforePay;
   const month=t.toLocaleDateString("en-US",{month:"long"});
   return `<div class="card"><h2>${esc(month)} bills</h2>
     <div class="split">
@@ -685,7 +685,7 @@ function chaseDueUntil(end){
   return {sum:Math.round(sum*100)/100,items:items.sort((a,b)=>a.due-b.due)};
 }
 function incomeSplit(amt,src,dateS){
-  const P=S.plan,c=compute(),lb=L(),chase=+P.accounts?.chase||0;
+  const P=S.plan,c=compute(),lb=L(),chase=acctBal("chase");
   const d=dn(dateS||todayS()),end=Math.max(d,dn(todayS()))+14,due=chaseDueUntil(end);
   const short=Math.max(0,Math.round((due.sum-chase)*100)/100);
   if(src==="mine"){const toChase=Math.min(amt,short),spend=Math.round(POOLS.reduce((s,p)=>s+c[p].budget,0)*perCheckFactor()*100)/100;
@@ -747,6 +747,36 @@ function incomeCard(){
 function acctAdjust(which,delta){const P=S.plan;const r=v=>Math.round(v*100)/100;
   if(String(which).startsWith("x:")){const a=(P.otherAccts||[]).find(x=>x.id===which.slice(2));if(a)a.bal=r((+a.bal||0)+delta);return}
   P.accounts=P.accounts||{};P.accounts[which]=r((+P.accounts[which]||0)+delta)}
+/* ---------- spending cards linked to bank accounts ----------
+   A linked card's purchases come out of its account, and on refill day the top-up moves from the
+   "refills come from" account into it. Worked out live from the purchases, so it also counts ones
+   logged on a partner's phone. Only counts what happened after a balance was last typed in. */
+function linkOf(pool){const m=S.plan?.cardAcct||{};return String(pool).startsWith("event:")?(m.events||""):(m[pool]||"")}
+function dayMs(w){return new Date(ds(w)+"T00:00:00").getTime()}
+function acctDelta(k){
+  const P=S.plan;if(!P?.cardAcct)return 0;const since=(P.acctAsOf||{})[k];if(!since)return 0;let d=0;
+  for(const t of S.txns)if((t.ts||0)>since&&linkOf(t.pool)===k)d-=t.amount;
+  const src=P.refillFrom||"";
+  if(src){const c=compute(),L=c.L;
+    for(let i=1;i<L.length;i++){const w=L[i],prev=L[i-1],ms=dayMs(w);if(ms<=since)continue;
+      for(const p of POOLS){const a=linkOf(p);if(!a||a===src||(a!==k&&src!==k))continue;
+        const r=c.R[p],left=budgetFor(p,prev)+(r.adj[prev]||0)-(r.spent[prev]||0),top=Math.max(0,budgetFor(p,w)+(r.adj[w]||0)-left);
+        if(a===k)d+=top;if(src===k)d-=top}}}
+  return Math.round(d*100)/100;
+}
+function acctStored(k){const P=S.plan||{};if(String(k).startsWith("x:"))return +((P.otherAccts||[]).find(a=>"x:"+a.id===k)?.bal)||0;return +(P.accounts?.[k])||0}
+function acctBal(k){return Math.round((acctStored(k)+acctDelta(k))*100)/100}
+function cardLinkCard(){
+  const P=S.plan,m=P.cardAcct||{},accts=acctList();
+  const sel=(k,v)=>`<select data-link="${esc(k)}"><option value="">Not linked</option>${accts.map(a=>`<option value="${esc(a.k)}" ${a.k===v?"selected":""}>${esc(a.name)}</option>`).join("")}</select>`;
+  return `<div class="card"><h2>Spending money accounts</h2>
+    <div class="small muted">Link each card to the bank account it spends from. Purchases then come out of that balance automatically, and refills move over on their own. Leave a card "Not linked" to track it yourself.</div>
+    <div class="list" style="margin-top:8px">${POOLS.map(p=>`<div class="item"><div class="grow">${esc(NAMES[p])}</div>${sel(p,m[p]||"")}</div>`).join("")}
+      <div class="item"><div class="grow">Special budgets</div>${sel("events",m.events||"")}</div></div>
+    <label class="f" style="margin-top:10px">Refill top-ups come from${`<select data-link="__src"><option value="">Nowhere (don't move money)</option>${accts.map(a=>`<option value="${esc(a.k)}" ${a.k===(P.refillFrom||"")?"selected":""}>${esc(a.name)}</option>`).join("")}</select>`}</label>
+    <div class="small muted">Cards linked to this same account don't need a transfer. Their purchases already come out of it.</div>
+  </div>`;
+}
 function acctList(){const P=S.plan||{},lb=L();return [{k:"usaa",name:lb.save},{k:"chase",name:lb.bills},...(P.otherAccts||[]).map(a=>{if(!a.id)a.id="a"+Math.random().toString(36).slice(2,8);return {k:"x:"+a.id,name:a.name}})]}
 function acctName(k){return acctList().find(a=>a.k===k)?.name||"Account"}
 function acctOpts(sel){return acctList().map(a=>`<option value="${esc(a.k)}" ${a.k===sel?"selected":""}>${esc(a.name)}</option>`).join("")}
@@ -760,7 +790,7 @@ function depositPlan(amt,src,dateS,goal){
   for(const x of r.splits||[]){const v=Math.min(left,Math.max(0,+x.amt||0));if(v>0){add(x.to,v);auto.push({to:x.to,amt:v});left-=v}}
   const spend=r.spend&&!goal?Math.min(left,Math.round(POOLS.reduce((s,p)=>s+c[p].budget,0)*perCheckFactor()*100)/100):0;left-=spend;
   add(r.home,left);
-  const d=dn(dateS||todayS()),end=Math.max(d,dn(todayS()))+14,due=chaseDueUntil(end),chase=+P.accounts?.chase||0;
+  const d=dn(dateS||todayS()),end=Math.max(d,dn(todayS()))+14,due=chaseDueUntil(end),chase=acctBal("chase");
   let move=0;if(r.cover&&r.home!=="chase"){const short=Math.max(0,due.sum-chase-(out.chase||0));move=Math.min(short,out[r.home]||0);if(move>0){add(r.home,-move);add("chase",move)}}
   return {out,auto,spend,move,due,chase,end,rule:r};
 }
@@ -789,22 +819,24 @@ function depositSummary(amt,src){const d=depositPlan(amt,src);const parts=Object
 function billAcct(b){if(b.from==="savings")return "usaa";if(String(b.from).startsWith("x:")&&(S.plan?.otherAccts||[]).some(a=>"x:"+a.id===b.from))return b.from;return "chase"}
 function vaultTab(){
   const P=S.plan;if(!P)return planTab();
-  const lb=L(),sav=+P.accounts?.usaa||0,bills=+P.accounts?.chase||0,floor=+P.floor||0,goals=P.goals||[],others=P.otherAccts||[];
-  const total=sav+bills+others.reduce((s,a)=>s+(+a.bal||0),0);
+  const lb=L(),sav=acctBal("usaa"),bills=acctBal("chase"),floor=+P.floor||0,goals=P.goals||[],others=P.otherAccts||[];
+  const total=sav+bills+others.reduce((s,a)=>s+acctBal("x:"+a.id),0);
   const inBuckets=goals.filter(g=>!g.done).reduce((s,g)=>s+(+g.saved||0),0),free=sav-inBuckets,above=sav-floor;
   const c=compute(),cush=POOLS.map(p=>({p,v:c[p].cushion})),cushTot=cush.reduce((s,x)=>s+x.v,0);
   const due=dueBeforePayday("chase"),pay=nextPayday(),billsLeft=bills-due;
   return `<section>
     <div class="card"><h2>Accounts</h2>
-      <div class="acct"><span>${esc(lb.save)} <span class="muted small">savings</span></span><input data-plan="accounts.usaa" inputmode="decimal" value="${esc(P.accounts?.usaa??"")}"></div>
-      <div class="acct"><span>${esc(lb.bills)} <span class="muted small">bills</span></span><input data-plan="accounts.chase" inputmode="decimal" value="${esc(P.accounts?.chase??"")}"></div>
-      ${others.map((a,i)=>`<div class="acct"><span>${esc(a.name)}</span><input data-plan="otherAccts.${i}.bal" inputmode="decimal" value="${esc(a.bal)}"><button class="x" data-act="delacct" data-i="${i}" aria-label="Remove ${esc(a.name)}">✕</button></div>`).join("")}
+      <div class="acct"><span>${esc(lb.save)} <span class="muted small">savings</span></span><input data-plan="accounts.usaa" inputmode="decimal" value="${P.accounts?.usaa==null?"":esc(acctBal("usaa").toFixed(2))}"></div>
+      <div class="acct"><span>${esc(lb.bills)} <span class="muted small">bills</span></span><input data-plan="accounts.chase" inputmode="decimal" value="${P.accounts?.chase==null?"":esc(acctBal("chase").toFixed(2))}"></div>
+      ${others.map((a,i)=>`<div class="acct"><span>${esc(a.name)}</span><input data-plan="otherAccts.${i}.bal" inputmode="decimal" value="${esc(acctBal("x:"+a.id).toFixed(2))}"><button class="x" data-act="delacct" data-i="${i}" aria-label="Remove ${esc(a.name)}">✕</button></div>`).join("")}
       <div class="kv tot"><span><b>Total in the bank</b></span><b>${m2(total)}</b></div>
       <details><summary class="small"><b>Add an account</b></summary><form class="form" id="acctf" style="margin-top:8px"><div class="row">
         <label class="f">Name<input id="ac-name" placeholder="Grace Checking"></label><label class="f">Balance<input id="ac-bal" inputmode="decimal" placeholder="0"></label></div>
         <button class="btn ghost" type="submit">Add account</button></form></details>
       <div class="muted small">Balances update on their own when bills autopay and when you log a paycheck. Fix them any time you check the bank apps${P.accounts?.updated?` · last checked ${esc(P.accounts.updated)}`:""}.</div>
     </div>
+
+    ${cardLinkCard()}
 
     <div class="card"><h2>Bills money</h2>
       <div class="split"><span>${esc(lb.bills)} balance</span><b class="num">${m2(bills)}</b>
@@ -894,7 +926,7 @@ function runScenario(amt,pool){
   if(pool!=="none"){take(`${NAMES[pool]} ${PER().this}`,c[pool].left,null);take(`${NAMES[pool]}'s cushion`,c[pool].cushion,`cushion:${pool}`)}
   if(pool!=="extras"){take(`${NAMES.extras} ${PER().this}`,c.extras.left,"week:extras");take(`${NAMES.extras} cushion`,c.extras.cushion,"cushion:extras")}
   for(const q of POOLS)if(q!==pool&&q!=="extras")take(`${NAMES[q]}'s cushion`,c[q].cushion,`cushion:${q}`);
-  if(S.plan){const P=S.plan,bal=+P.accounts?.usaa||0,inB=(P.goals||[]).filter(g=>!g.done).reduce((s,g)=>s+(+g.saved||0),0);
+  if(S.plan){const P=S.plan,bal=acctBal("usaa"),inB=(P.goals||[]).filter(g=>!g.done).reduce((s,g)=>s+(+g.saved||0),0);
     take(`${L().save}, unassigned and above the floor`,Math.max(0,bal-Math.max(+P.floor||0,0)-inB),"usaa")}
   return {steps,short:Math.max(0,Math.round(need*100)/100),pool,amt};
 }
@@ -1035,7 +1067,7 @@ function planTab(){
   const check=+P.paycheck?.aspen||0;
   const toSave=check-perCheck-spend;
   const gNet=(+P.paycheck?.grace||0)-(+P.paycheck?.graceBills||0)*12/26;
-  const above=(+P.accounts?.usaa||0)-(+P.floor||0);
+  const above=(acctBal("usaa"))-(+P.floor||0);
   const goals=P.goals||[];
   return `<section>
     ${incomeCard()}
@@ -1277,7 +1309,15 @@ document.addEventListener("change",e=>{
     const v=parseInt(s,10);if(!(v>=1&&v<=31)){toast("Enter a day from 1 to 31");el.value=dayOf(b)??"";return}
     b.day=String(v);render();savePlan();toast(`${b.name} is now due the ${ordinal(v)}`);return}
   if(el.dataset.plan&&S.plan){const v=num(el.value);if(!isFinite(v)){toast("Enter a number");return}
-    setPath(S.plan,el.dataset.plan,v);if(el.dataset.plan.startsWith("accounts.")||el.dataset.plan.startsWith("otherAccts."))S.plan.accounts.updated=todayS();render();savePlan()}
+    setPath(S.plan,el.dataset.plan,v);if(el.dataset.plan.startsWith("accounts.")||el.dataset.plan.startsWith("otherAccts.")){S.plan.accounts.updated=todayS();
+      const pa=el.dataset.plan.split("."),k=pa[0]==="accounts"?pa[1]:"x:"+(S.plan.otherAccts[+pa[1]]?.id);S.plan.acctAsOf={...(S.plan.acctAsOf||{}),[k]:Date.now()}}render();savePlan()}
+  if(el.dataset.link!=null&&S.plan){const P=S.plan,k=el.dataset.link,v=el.value;P.cardAcct=P.cardAcct||{};
+    const now=Date.now(),asOf=P.acctAsOf=P.acctAsOf||{};
+    // start counting from now for any account that becomes linked, so older purchases aren't taken out twice
+    if(v&&!asOf[v])asOf[v]=now;
+    if(k==="__src")P.refillFrom=v;else P.cardAcct[k]=v;
+    for(const a of Object.values(P.cardAcct).concat(P.refillFrom||[]))if(a&&!asOf[a])asOf[a]=now;
+    render();savePlan();toast(v?`Linked to ${acctName(v)}`:"Not linked");return}
   if(el.id==="dep-src"){S.depSrc=el.value;render();return}
   if(el.dataset.dep&&S.plan){const r=depRuleSet(S.depSrc||"mine"),k=el.dataset.dep,i=+el.dataset.i;
     if(k==="amt"){const v=num(el.value);if(!(v>=0)){toast("Enter a number");return}r.splits[i].amt=v}
@@ -1597,7 +1637,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202609301836";
+const BUILD="202609301846";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
