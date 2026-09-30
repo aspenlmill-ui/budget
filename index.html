@@ -621,6 +621,7 @@ function billsCard(){
     </div>
     <span class="chip ${cover<0?"bad":cover<100?"warn":""}" style="margin-top:8px">${cover<0?`${m2(-cover)} short before payday`:`Covered, ${m2(cover)} to spare`}</span>
     ${fromSav>0?`<div class="small muted" style="margin-top:6px">Also coming out of ${esc(lb.save)} before payday: ${m2(fromSav)}</div>`:""}
+    ${acctList().filter(x=>x.k.startsWith("x:")).map(x=>{const v=dueBeforePayday(x.k);return v>0?`<div class="small muted" style="margin-top:4px">Coming out of ${esc(x.name)} before payday: ${m2(v)}</div>`:""}).join("")}
     <div class="bar" style="margin-top:12px"><i style="width:${pct(paidAmt,total)}%"></i></div>
     <div class="muted small" style="margin-top:4px">${m0(paidAmt)} of ${m0(total)} paid this month</div>
     ${needAmt.length?`<div class="chip warn" style="margin-top:8px">Enter this month's amount: ${needAmt.map(r=>esc(r.b.name)).join(", ")}</div>`:""}
@@ -773,7 +774,7 @@ function depositCard(){
   </div>`;
 }
 function depositSummary(amt,src){const d=depositPlan(amt,src);const parts=Object.entries(d.out).filter(([,v])=>v>0).map(([k,v])=>`${m0(v)} to ${acctName(k)}`);if(d.spend)parts.push(`${m0(d.spend)} spending refill`);return parts.join(", ")||"nothing"}
-function billAcct(b){return b.from==="savings"?"usaa":"chase"}
+function billAcct(b){if(b.from==="savings")return "usaa";if(String(b.from).startsWith("x:")&&(S.plan?.otherAccts||[]).some(a=>"x:"+a.id===b.from))return b.from;return "chase"}
 function vaultTab(){
   const P=S.plan;if(!P)return planTab();
   const lb=L(),sav=+P.accounts?.usaa||0,bills=+P.accounts?.chase||0,floor=+P.floor||0,goals=P.goals||[],others=P.otherAccts||[];
@@ -953,7 +954,7 @@ function budgetsDetail(){
 }
 
 /* ---------- Bills tab: this month + manage bills ---------- */
-function billSummary(b){const d=dayOf(b);return [autopayOn(b)?"Autopay":"You pay it",d?`due the ${ordinal(d)}`:"no set due date",`from ${billAcct(b)==="usaa"?L().save:L().bills}`,closingOn()&&b.phase==="pre"?"until closing":closingOn()&&b.phase==="post"?"after closing":""].filter(Boolean).join(" · ")}
+function billSummary(b){const d=dayOf(b);return [autopayOn(b)?"Autopay":"You pay it",d?`due the ${ordinal(d)}`:"no set due date",`from ${acctName(billAcct(b))}`,closingOn()&&b.phase==="pre"?"until closing":closingOn()&&b.phase==="post"?"after closing":""].filter(Boolean).join(" · ")}
 function billHint(va,ap,hasDay){
   if(ap&&!hasDay)return "Autopay needs a due date.";
   if(ap)return va?"Marks itself paid on the due date using your estimate. Enter the real amount before the month ends; you'll get a reminder 2 days before.":"Marks itself paid on the due date and takes it out of the account.";
@@ -969,7 +970,7 @@ function billForm(b,i){
     <label class="f"><span id="bl-amt-label">${va?"Usual amount (a guess is fine)":"Amount"}</span><input id="bl-amt" inputmode="decimal" value="${b.amt??""}" placeholder="0.00"></label>
     <div class="f">Autopay?<div class="seg" data-grp="auto"><button type="button" data-act="blseg" data-v="1" aria-pressed="${ap}">Yes, it autopays</button><button type="button" data-act="blseg" data-v="0" aria-pressed="${!ap}">No, I pay it</button></div></div>
     <label class="f">Due day (1–31)<input id="bl-day" inputmode="numeric" value="${dayOf(b)??""}" placeholder="Leave blank if there's no set date"></label>
-    <div class="row"><label class="f">Paid from<select id="bl-from"><option value="bills" ${b.from!=="savings"?"selected":""}>${esc(lb.bills)}</option><option value="savings" ${b.from==="savings"?"selected":""}>${esc(lb.save)}</option></select></label>
+    <div class="row"><label class="f">Paid from<select id="bl-from">${acctList().map(a=>{const v=a.k==="chase"?"bills":a.k==="usaa"?"savings":a.k;return `<option value="${esc(v)}" ${billAcct(b)===a.k?"selected":""}>${esc(a.name)}</option>`}).join("")}</select></label>
       ${closingOn()?`<label class="f">When<select id="bl-phase"><option value="both" ${!b.phase||b.phase==="both"?"selected":""}>Always</option><option value="pre" ${b.phase==="pre"?"selected":""}>Until closing</option><option value="post" ${b.phase==="post"?"selected":""}>After closing</option></select></label>`:""}</div>
     <div class="small muted" id="bl-hint">${billHint(va,ap,!!dayOf(b))}</div>
     <div class="row"><button class="btn" type="submit">Save</button><button class="btn ghost" type="button" data-act="billcancel">Cancel</button></div>
@@ -1365,7 +1366,7 @@ document.addEventListener("submit",async e=>{
     if(ds_&&!(d>=1&&d<=31)){toast("Due day has to be 1 to 31");return}
     if(ap&&!ds_){toast("Autopay needs a due date");return}
     if(S.plan.bills.some((x,j)=>x.name.toLowerCase()===name.toLowerCase()&&String(j)!==String(i))){toast("You already have a bill with that name");return}
-    const fields={name,amt:isFinite(amt)?amt:0,variable:va,auto:ap,day:ds_?String(d):"",from:val("bl-from"),acct:val("bl-from")==="savings"?L().save:L().bills,phase:document.getElementById("bl-phase")?val("bl-phase"):(i==="new"?"both":S.plan.bills[+i].phase||"both")};
+    const fields={name,amt:isFinite(amt)?amt:0,variable:va,auto:ap,day:ds_?String(d):"",from:val("bl-from"),acct:acctName(val("bl-from")==="savings"?"usaa":val("bl-from")==="bills"?"chase":val("bl-from")),phase:document.getElementById("bl-phase")?val("bl-phase"):(i==="new"?"both":S.plan.bills[+i].phase||"both")};
     if(i==="new")S.plan.bills.push({...fields,added:todayS()});
     else{const b=S.plan.bills[+i];if(b.name!==name)renameBillKeys(b.name,name);Object.assign(b,fields)}
     S.billEdit=null;render();savePlan();toast(i==="new"?`Added ${name}`:"Saved")}
@@ -1576,7 +1577,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202609301354";
+const BUILD="202609301801";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
