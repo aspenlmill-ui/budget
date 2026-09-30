@@ -1589,14 +1589,18 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202609301827";
+const BUILD="202609301829";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
-    if(v&&v!==BUILD&&!typing&&!(S.rq||[]).some(q=>q.state==="reading"))location.reload();}catch(_){}
+    if(!v||v===BUILD||typing||(S.rq||[]).some(q=>q.state==="reading"))return;
+    // Load the new version by a fresh address so a cached copy can't come back; try each version only once.
+    if(new URLSearchParams(location.search).get("v")===v)return;
+    location.replace(location.pathname+"?v="+encodeURIComponent(v)+location.hash);}catch(_){}
 }
 document.addEventListener("visibilitychange",()=>{if(!document.hidden)checkUpdate()});
 setInterval(checkUpdate,20*60*1000);
+setTimeout(checkUpdate,1500);
 
 /* ---------- sign in ---------- */
 const steps=n=>`<ol class="steps">${["Create your account","Start or join a household","Name your budget"].map((s,i)=>`<li class="${i+1<n?"done":i+1===n?"now":""}"><span>${i+1<n?"✓":i+1}</span>${s}</li>`).join("")}</ol>`;
