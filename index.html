@@ -752,15 +752,20 @@ function acctAdjust(which,delta){const P=S.plan;const r=v=>Math.round(v*100)/100
    "refills come from" account into it. Worked out live from the purchases, so it also counts ones
    logged on a partner's phone. Only counts what happened after a balance was last typed in. */
 function linkOf(pool){const m=S.plan?.cardAcct||{};return String(pool).startsWith("event:")?(m.events||""):(m[pool]||"")}
+function splurgeAcct(){const P=S.plan||{};return P.splurgeAcct||P.refillFrom||""}
+function epAcct(ep){ep=String(ep);const [k,p]=ep.split(":");
+  if(k==="week"||k==="next")return linkOf(p);if(k==="cushion")return splurgeAcct();if(k==="event")return linkOf(ep);
+  if(k==="goal"||ep==="usaa")return (S.plan?.cardAcct&&Object.keys(S.plan.cardAcct).length)||S.plan?.refillFrom?"usaa":"";return ""}
 function dayMs(w){return new Date(ds(w)+"T00:00:00").getTime()}
 function acctDelta(k){
   const P=S.plan;if(!P?.cardAcct)return 0;const since=(P.acctAsOf||{})[k];if(!since)return 0;let d=0;
-  for(const t of S.txns)if((t.ts||0)>since&&linkOf(t.pool)===k)d-=t.amount;
+  for(const t of S.txns)if((t.ts||0)>since&&(t.from==="cushion"&&!String(t.pool).startsWith("event:")?splurgeAcct():linkOf(t.pool))===k)d-=t.amount;
+  for(const m of S.moves){if((m.ts||0)<=since)continue;const a=epAcct(m.from),b=epAcct(m.to);if(!a||!b||a===b)continue;if(a===k)d-=m.amount;if(b===k)d+=m.amount}
   const src=P.refillFrom||"";
   if(src){const c=compute(),L=c.L;
     for(let i=1;i<L.length;i++){const w=L[i],prev=L[i-1],ms=dayMs(w);if(ms<=since)continue;
       for(const p of POOLS){const a=linkOf(p);if(!a||a===src||(a!==k&&src!==k))continue;
-        const r=c.R[p],left=budgetFor(p,prev)+(r.adj[prev]||0)-(r.spent[prev]||0),top=Math.max(0,budgetFor(p,w)+(r.adj[w]||0)-left);
+        const r=c.R[p],left=budgetFor(p,prev)+(r.adj[prev]||0)-(r.spent[prev]||0),top=Math.max(0,budgetFor(p,w)-left);
         if(a===k)d+=top;if(src===k)d-=top}}}
   return Math.round(d*100)/100;
 }
@@ -775,6 +780,8 @@ function cardLinkCard(){
       <div class="item"><div class="grow">Special budgets</div>${sel("events",m.events||"")}</div></div>
     <label class="f" style="margin-top:10px">Refill top-ups come from${`<select data-link="__src"><option value="">Nowhere (don't move money)</option>${accts.map(a=>`<option value="${esc(a.k)}" ${a.k===(P.refillFrom||"")?"selected":""}>${esc(a.name)}</option>`).join("")}</select>`}</label>
     <div class="small muted">Cards linked to this same account don't need a transfer. Their purchases already come out of it.</div>
+    <label class="f" style="margin-top:10px">Splurge money is kept in<select data-link="__spl"><option value="">Same as refills${P.refillFrom?` (${esc(acctName(P.refillFrom))})`:""}</option>${accts.map(a=>`<option value="${esc(a.k)}" ${a.k===(P.splurgeAcct||"")?"selected":""}>${esc(a.name)}</option>`).join("")}</select></label>
+    <div class="small muted">When only the difference moves over on refill day, whatever wasn't spent stays here as splurge money. Splurge purchases and money moved between accounts update these balances too.</div>
   </div>`;
 }
 function acctList(){const P=S.plan||{},lb=L();return [{k:"usaa",name:lb.save},{k:"chase",name:lb.bills},...(P.otherAccts||[]).map(a=>{if(!a.id)a.id="a"+Math.random().toString(36).slice(2,8);return {k:"x:"+a.id,name:a.name}})]}
@@ -1315,7 +1322,7 @@ document.addEventListener("change",e=>{
     const now=Date.now(),asOf=P.acctAsOf=P.acctAsOf||{};
     // start counting from now for any account that becomes linked, so older purchases aren't taken out twice
     if(v&&!asOf[v])asOf[v]=now;
-    if(k==="__src")P.refillFrom=v;else P.cardAcct[k]=v;
+    if(k==="__src")P.refillFrom=v;else if(k==="__spl")P.splurgeAcct=v;else P.cardAcct[k]=v;
     for(const a of Object.values(P.cardAcct).concat(P.refillFrom||[]))if(a&&!asOf[a])asOf[a]=now;
     render();savePlan();toast(v?`Linked to ${acctName(v)}`:"Not linked");return}
   if(el.id==="dep-src"){S.depSrc=el.value;render();return}
@@ -1637,7 +1644,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202609301846";
+const BUILD="202609301851";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
