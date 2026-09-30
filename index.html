@@ -1085,8 +1085,6 @@ function confirmTap(b,msg){if(b.dataset.armed==="1")return true;b.dataset.armed=
 function closingCard(){
   const P=S.plan,on=closingOn(),pre=(P.bills||[]).filter(b=>b.phase==="pre"),post=(P.bills||[]).filter(b=>b.phase==="post");
   if(!on)return "";
-  return `<div class="card"><h2>Buying a house?</h2><div class="small muted">Turn this on if some bills will change after you close (like rent ending and a mortgage starting). You can mark each bill as "until closing" or "after closing" and see both totals.</div>
-    <button class="btn ghost" data-act="closingon" style="margin-top:10px">Turn on closing mode</button></div>`;
   return `<div class="card"><h2>House closing</h2><div class="small muted">Bills can be set to "until closing" or "after closing." Once you've closed, tap below: bills marked "until closing"${pre.length?` (${esc(pre.map(b=>b.name).join(", "))})`:""} are removed, "after closing" bills become regular bills, and this option goes away.</div>
     <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
       <button class="btn" data-act="closed">We've closed</button>
