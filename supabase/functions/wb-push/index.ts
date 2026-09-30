@@ -115,7 +115,7 @@ function manualDue(plan: any, today: string) {
 }
 
 // deno-lint-ignore no-explicit-any
-async function billCheck(subs: any[], force: boolean, only: string | null) {
+async function billCheck(subs: any[], force: boolean, only: string | null, sample = "") {
   let sent = 0, skipped = 0, removed = 0;
   const done = new Set<string>();
   for (const sub of subs ?? []) {
@@ -135,14 +135,14 @@ async function billCheck(subs: any[], force: boolean, only: string | null) {
     ]);
     const canSee = hh?.created_by === sub.user_id || !!st?.data?.partnerFull;
     if (!canSee || !pl?.data) continue;
-    const due = manualDue(pl.data, now.date);
+    const due = sample ? [{ name: sample === "amount" ? "Enbridge gas (test)" : "Electric (test)", due: dn(now.date), amt: 120, ask: sample === "amount" ? "amount" : "paid", vary: true }] : manualDue(pl.data, now.date);
     if (!due.length) continue;
     const t = dn(now.date);
     const title = due.length > 1 ? `${due.length} bills to check` : due[0].ask === "amount" ? `What was ${due[0].name} this month?` : `Did you pay ${due[0].name}?`;
     const fmt = (x: number) => new Date(x * DAY).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
     const body = due.map((x) => x.ask === "amount" ? `${x.name}: enter this month's amount` : `${x.name}: ${x.vary ? "about " : ""}${money(x.amt)}${x.due === null ? " this month" : x.due < t ? " (was due " + fmt(x.due) + ")" : " due today"}`).join("\n") + "\nTap to update it in the app.";
     try {
-      await webpush.sendNotification({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth_key } }, JSON.stringify({ notification: { title, body, tag: `bills-${now.date}`, navigate: APP_URL + "#bills" } }), { TTL: 6 * 3600 });
+      await webpush.sendNotification({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth_key } }, JSON.stringify({ notification: { title, body, tag: `bills-${now.date}${sample}`, navigate: APP_URL + "#bills" } }), { TTL: 6 * 3600 });
       sent++;
       if (!force && !done.has(sub.user_id)) { done.add(sub.user_id); await supabase.from("notification_send_log").insert({ user_id: sub.user_id, local_date: now.date, notification_type: "bill_check" }); }
     } catch (e: any) {
@@ -167,8 +167,8 @@ Deno.serve(async (req) => {
   if (error) return Response.json({ ok: false, error: error.message }, { status: 500 });
   // Each phone gets its own 5 PM bill check and 7 PM balance, in its own time zone.
   const at = (h: number) => (allSubs ?? []).filter((x) => localNow(x.tz).hour === h);
-  const bills = force ? (kind === "bills" ? await billCheck(allSubs ?? [], true, only) : null) : await billCheck(at(17), false, only);
-  if (force && kind === "bills") return Response.json({ ok: true, ...bills });
+  const bills = force ? (kind === "bills" || kind === "sample" ? await billCheck(allSubs ?? [], true, only, kind === "sample" ? (url.searchParams.get("ask") || "paid") : "") : null) : await billCheck(at(17), false, only);
+  if (force && (kind === "bills" || kind === "sample")) return Response.json({ ok: true, ...bills });
   const subs = force ? (allSubs ?? []) : at(19);
   let sent = 0, skipped = 0, removed = 0, failed = 0;
   const cache: Record<string, unknown> = {};
