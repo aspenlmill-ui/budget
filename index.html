@@ -429,6 +429,7 @@ function weekFrac(c){const len=Math.max(1,nextReset()-c.cw),day=dn(todayS())-c.c
 function poolStatus(x,frac){
   if(x.left<-0.004)return x.cushion+x.left>=0?"warn":"bad";
   if(x.alloc<=0)return "good";
+  if(x.alloc>40&&x.left<=20)return "warn"; // $20 or less left on a spending card
   const used=x.spent/x.alloc;
   if(used>=0.9&&frac<0.85)return "warn";
   if(used>frac+0.15)return "warn";
@@ -1651,7 +1652,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202609301938";
+const BUILD="202609301943";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);

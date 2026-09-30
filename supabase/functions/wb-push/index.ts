@@ -33,6 +33,7 @@ function localNow(tz?: string) {
 function poolStatus(x: any, frac: number) {
   if (x.left < -0.004) return x.cushion + x.left >= 0 ? "warn" : "bad";
   if (x.alloc <= 0) return "good";
+  if (x.alloc > 40 && x.left <= 20) return "warn";
   const used = x.spent / x.alloc;
   if (used >= 0.9 && frac < 0.85) return "warn";
   if (used > frac + 0.15) return "warn";
