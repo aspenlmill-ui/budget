@@ -8,7 +8,12 @@ const secretKeys = JSON.parse(Deno.env.get("SUPABASE_SECRET_KEYS") ?? "{}");
 const supabase = createClient(SUPABASE_URL, secretKeys.default, { auth: { persistSession: false, autoRefreshToken: false } });
 const VAPID_PUBLIC_KEY = Deno.env.get("VAPID_PUBLIC_KEY")!;
 webpush.setVapidDetails(Deno.env.get("VAPID_SUBJECT")!, VAPID_PUBLIC_KEY, Deno.env.get("VAPID_PRIVATE_KEY")!);
-const CRON_SECRET = Deno.env.get("CRON_SECRET")!;
+// The shared secret lives in Supabase Vault; only the service role can read it.
+let CRON_SECRET: string | null = null;
+async function cronSecret() {
+  if (!CRON_SECRET) { const { data } = await supabase.rpc("wb_cron_secret"); CRON_SECRET = typeof data === "string" && data.length >= 32 ? data : null; }
+  return CRON_SECRET;
+}
 const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type" };
 
 const DAY = 864e5;
@@ -158,7 +163,8 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   const url = new URL(req.url);
   if (req.method === "GET" && url.searchParams.get("key") === "1") return Response.json({ publicKey: VAPID_PUBLIC_KEY }, { headers: cors });
-  if (req.headers.get("x-cron-secret") !== CRON_SECRET) return new Response("Unauthorized", { status: 401 });
+  const secret = await cronSecret();
+  if (!secret || req.headers.get("x-cron-secret") !== secret) return new Response("Unauthorized", { status: 401 });
 
   const force = url.searchParams.get("force") === "1";
   const only = url.searchParams.get("user");
