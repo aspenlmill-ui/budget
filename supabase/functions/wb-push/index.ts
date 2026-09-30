@@ -111,6 +111,7 @@ function manualDue(plan: any, today: string) {
       const y = M + off < 1 ? Y - 1 : Y, m = (M - 1 + off + 12) % 12, key = `${b.name}|${y}-${String(m + 1).padStart(2, "0")}`;
       if (sn[key] === today) continue;
       const due = d === null ? null : Math.round(Date.UTC(y, m, Math.min(d, new Date(Date.UTC(y, m + 1, 0)).getUTCDate())) / DAY);
+      if (due !== null && b.added && dn(b.added) > due) continue;
       // deno-lint-ignore no-explicit-any
       const pl = (plan.paidLog || []).find((x: any) => x.key === key), part = !!pl && !paid.has(key);
       const est = Math.max(0, (va[key] != null ? +va[key] : +b.amt || 0) - (part ? +pl.amount || 0 : 0));

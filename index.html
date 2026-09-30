@@ -612,11 +612,18 @@ function nextPayday(){const a=dn(S.plan?.payAnchor||anchor()),t=dn(todayS());let
 function billRows(){
   const P=S.plan,phase=P.postClosing?"post":"pre",t=new Date(),y=t.getFullYear(),m=t.getMonth(),today=dn(todayS());
   const paid=new Set(P.paid||[]);
-  return (P.bills||[]).map((b,i)=>({b,i})).filter(x=>!x.b.phase||x.b.phase==="both"||x.b.phase===phase).map(x=>{
+  const rows=(P.bills||[]).map((b,i)=>({b,i})).filter(x=>!x.b.phase||x.b.phase==="both"||x.b.phase===phase).map(x=>{
     const d=dayOf(x.b);if(d===null)return {...x,due:null,paid:paid.has(x.b.name+"|"+ym(y,m)),key:x.b.name+"|"+ym(y,m)};
     const due=dueIn(y,m,d),key=x.b.name+"|"+ds(due).slice(0,7);
     return {...x,due,key,paid:paid.has(key),late:!paid.has(key)&&due<today};
-  }).sort((a,b)=>(a.due??1e9)-(b.due??1e9));
+  }).filter(r=>!(r.due!=null&&r.b.added&&dn(r.b.added)>r.due&&!r.paid)); // added after this month's due date: starts next month
+  // Last month's bills that still aren't paid stay on the list (up to 2 weeks past due) so nothing slips at the 1st.
+  const py=m===0?y-1:y,pm=(m+11)%12,prev=[];
+  for(const x of (P.bills||[]).map((b,i)=>({b,i}))){if(x.b.phase&&x.b.phase!=="both"&&x.b.phase!==phase)continue;const d=dayOf(x.b);if(d===null)continue;
+    const due=dueIn(py,pm,d),key=x.b.name+"|"+ds(due).slice(0,7);if(paid.has(key)||due<today-14)continue;
+    if(x.b.added&&dn(x.b.added)>due)continue;
+    prev.push({...x,due,key,paid:false,late:true,prev:true})}
+  return [...prev,...rows].sort((a,b)=>(a.due??1e9)-(b.due??1e9));
 }
 function ordinal(n){const s=["th","st","nd","rd"],v=n%100;return n+(s[(v-20)%10]||s[v]||s[0])}
 function ym(y,m){return `${y}-${pad(m+1)}`}
@@ -625,7 +632,7 @@ function billsCard(){
   const t=new Date(),y=t.getFullYear(),m=t.getMonth();
   /* due before payday: this month's unpaid ones before payday, plus next month's early ones if payday crosses the month */
   const beforePay=dueBeforePayday("chase"),fromSav=dueBeforePayday("usaa");
-  const total=rows.reduce((s,r)=>s+billAmt(r.b,r.key),0),paidAmt=rows.reduce((s,r)=>s+(r.paid?(paidInfo(r.key)?.amount??billAmt(r.b,r.key)):paidSoFar(r.key)),0);
+  const mrows=rows.filter(r=>!r.prev),total=mrows.reduce((s,r)=>s+billAmt(r.b,r.key),0),paidAmt=mrows.reduce((s,r)=>s+(r.paid?(paidInfo(r.key)?.amount??billAmt(r.b,r.key)):paidSoFar(r.key)),0);
   const needAmt=rows.filter(r=>isVar(r.b)&&!r.paid&&S.plan?.varAmt?.[r.key]==null);
   const chase=acctBal("chase"),cover=chase-beforePay;
   const month=t.toLocaleDateString("en-US",{month:"long"});
@@ -688,9 +695,9 @@ function incomeSources(){return [["mine",`${NAMES.aspen}'s paycheck`],["partner"
 /* ---------- how a paycheck or extra money splits ---------- */
 function chaseDueUntil(end){
   const P=S.plan,phase=P.postClosing?"post":"pre",paid=new Set(P.paid||[]),today=dn(todayS());let sum=0;const items=[];
-  const t=new Date();for(let k=0;k<3;k++){const y=t.getFullYear()+Math.floor((t.getMonth()+k)/12),m=(t.getMonth()+k)%12;
+  const t=new Date();for(let k=-1;k<3;k++){const y=t.getFullYear()+Math.floor((t.getMonth()+k)/12),m=((t.getMonth()+k)%12+12)%12;
     for(const b of P.bills||[]){if(!(!b.phase||b.phase==="both"||b.phase===phase)||billAcct(b)!=="chase")continue;const d=dayOf(b);if(d===null)continue;
-      const due=dueIn(y,m,d),key=b.name+"|"+ds(due).slice(0,7);if(due<end&&!paid.has(key)&&due>=today-31){const am=billLeft(b,key);sum+=am;items.push({name:b.name,due,amt:am})}}}
+      const due=dueIn(y,m,d),key=b.name+"|"+ds(due).slice(0,7);if(b.added&&dn(b.added)>due)continue;if(due<end&&!paid.has(key)&&due>=today-31){const am=billLeft(b,key);sum+=am;items.push({name:b.name,due,amt:am})}}}
   return {sum:Math.round(sum*100)/100,items:items.sort((a,b)=>a.due-b.due)};
 }
 function incomeSplit(amt,src,dateS){
@@ -919,7 +926,7 @@ function goalEditForm(g,i,n){return `<form class="goal" id="goaledit" data-i="${
 function dueBeforePayday(acct){
   if(!S.plan)return 0;const rows=billRows().filter(r=>!acct||billAcct(r.b)===acct),pay=nextPayday(),t=new Date(),y=t.getFullYear(),m=t.getMonth();let sum=0;
   for(const r of rows){const d=dayOf(r.b);if(d===null)continue;if(!r.paid&&r.due<pay)sum+=billLeft(r.b,r.key);
-    const nx=dueIn(m===11?y+1:y,(m+1)%12,d);if(nx<pay&&nx>r.due)sum+=billAmt(r.b,r.b.name+"|"+ds(nx).slice(0,7))}
+    if(r.prev)continue;const nx=dueIn(m===11?y+1:y,(m+1)%12,d);if(nx<pay&&nx>r.due)sum+=billAmt(r.b,r.b.name+"|"+ds(nx).slice(0,7))}
   return sum;
 }
 function runAutopay(){
@@ -1664,7 +1671,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202609301949";
+const BUILD="202609301953";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
