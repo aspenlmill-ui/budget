@@ -113,6 +113,8 @@ input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid 
 .receipt-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.receipt-row label.btn{cursor:pointer}
 .spend-left{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;padding:10px 12px;border-radius:10px;background:var(--soft)}
 .spend-left b{font-size:22px;margin-left:auto}.spend-left.neg b{color:var(--bad)}
+.bd{padding:12px 0;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:6px}.bd:first-of-type{border-top:0;padding-top:0}
+.bd-top{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
 .rq{display:flex;flex-direction:column;gap:2px;margin-top:4px}
 .rq-item{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line)}.rq-item:first-child{border-top:0}
 .rq-item .rthumb{cursor:zoom-in}.rq-fix{display:flex;gap:6px;margin-top:4px}.rq-fix input{max-width:110px;padding:6px 8px;font-size:15px}
@@ -796,6 +798,22 @@ function payPlanner(P,c,perCheck,spend,gNet,post){
   </div>`;
 }
 
+/* ---------- plan: in-depth view of special budgets and bucket spending ---------- */
+function budgetsDetail(){
+  const evs=activeEvents(),log=[...(S.plan?.spendLog||[])].reverse();
+  if(!evs.length&&!log.length)return "";
+  return `<div class="card"><h2>Budgets for big expenses</h2>
+    ${evs.map(e=>{const s=evStats(e);const tx=s.tx;return `<div class="bd">
+      <div class="bd-top"><b>${esc(e.name)}</b><b class="num" style="color:${s.left<0?"var(--bad)":"inherit"}">${m2(s.left)} left</b></div>
+      <div class="bar"><i style="width:${pct(s.spent,s.budget)}%"></i></div>
+      <div class="split small" style="margin-top:6px"><span class="muted">Budget</span><b class="num">${m2(s.budget)}</b><span class="muted">Spent</span><b class="num">${m2(s.spent)}</b><span class="muted">Purchases</span><b class="num">${tx.length}</b></div>
+      ${tx.length?`<details><summary class="small"><b>See each purchase</b></summary><div class="list">${tx.map(t=>`<div class="item"><div class="grow"><div>${esc(t.note||"Purchase")}</div><div class="muted small">${short(dn(t.date))}</div></div><b class="num">${m2(t.amount)}</b>${t.receipt&&t.mine?`<button class="x" data-act="rview" data-path="${esc(t.receipt)}">Receipt</button>`:""}</div>`).join("")}</div></details>`:`<div class="small muted">Nothing spent yet.</div>`}
+    </div>`}).join("")}
+    ${log.length?`<div class="bd"><b>Paid from savings buckets</b><div class="list">${log.slice(0,20).map(x=>`<div class="item"><div class="grow"><div>${esc(x.note||x.goal)}</div><div class="muted small">${esc(x.goal)} · ${short(dn(x.date))}</div></div><b class="num">${m2(x.amt)}</b></div>`).join("")}</div></div>`:""}
+    <div class="small muted">Add or close these on the Special tab. Log spending from the bottom of the Week tab.</div>
+  </div>`;
+}
+
 function planTab(){
   const P=S.plan;
   if(!P)return S.planMissing?`<div class="empty">No plan yet. It holds your bills, account balances, debts and savings goals, and only you can see it.<div style="margin-top:10px"><button class="btn" data-act="blankplan">Start my plan</button></div></div>`:`<div class="empty">Loading your plan…</div>`;
@@ -813,6 +831,7 @@ function planTab(){
   return `<section>
     ${incomeCard()}
     ${billsCard()}
+    ${budgetsDetail()}
 
     ${payPlanner(P,c,perCheck,spend,gNet,post)}
 
