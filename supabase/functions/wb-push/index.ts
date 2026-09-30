@@ -42,9 +42,9 @@ function poolStatus(x: any, frac: number) {
 // deno-lint-ignore no-explicit-any
 function overall(out: any, pools: string[], frac: number) {
   const st = pools.map((p) => poolStatus(out[p], frac));
-  if (st.includes("bad")) return "🔴"; if (st.includes("warn")) return "🟡";
+  if (st.includes("bad")) return "☄️"; if (st.includes("warn")) return "🦴";
   const spent = pools.reduce((s, p) => s + out[p].spent, 0), alloc = pools.reduce((s, p) => s + out[p].alloc, 0);
-  if (frac >= 0.3 && alloc > 0 && spent / alloc <= frac * 0.7) return "🔥";
+  if (frac >= 0.3 && alloc > 0 && spent / alloc <= frac * 0.7) return "🌋";
   return "🦖";
 }
 // deno-lint-ignore no-explicit-any

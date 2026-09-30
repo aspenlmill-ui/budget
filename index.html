@@ -441,7 +441,7 @@ function overallStatus(c,pools){
   if(f>=0.3&&alloc>0&&spent/alloc<=f*0.7)return "fire";
   return "good";
 }
-const STATUS={fire:["🔥","Ahead of plan","Spending is well under pace. Nice."],good:["🦖","On track","Spending is right where it should be."],warn:["🟡","Be careful","Something is running ahead of pace or close to its limit."],bad:["🔴","Over budget","A card is over and its cushion can't cover it. Move money or pause spending."]};
+const STATUS={fire:["🌋","Volcano hot","Way under pace. The herd is thriving."],good:["🦖","On track","Right where you should be. All quiet in the jungle."],warn:["🦴","Raptor alert","Something is getting close to its limit. Tread carefully."],bad:["☄️","Extinction event","A card is over and its splurge can't cover it. Move money or pause spending."]};
 function statusBanner(c,pools){const s=overallStatus(c,pools),[em,t,d]=STATUS[s];
   return `<div class="status ${s}"><span class="em" aria-hidden="true">${em}</span><div><b>${t}</b><div class="small muted">${d}</div></div></div>`}
 
@@ -1650,7 +1650,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202609301910";
+const BUILD="202609301933";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
