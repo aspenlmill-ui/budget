@@ -418,6 +418,38 @@ function gettingStarted(){
     <button class="x" data-act="gshide" style="margin-top:6px">Hide this list</button></div>`;
 }
 
+/* ---------- set money aside toward a goal ---------- */
+function asideCard(){
+  if(!S.plan)return "";
+  const goals=(S.plan.goals||[]).map((g,i)=>({g,i})).filter(x=>!x.g.done);if(!goals.length)return "";
+  const sel=goals.some(x=>x.i===S.asideSel)?S.asideSel:goals[0].i,g=S.plan.goals[sel],lb=L();
+  const last=(S.plan.asideLog||[]).slice(-3).reverse();
+  return `<form class="card" id="asidef"><h2>Set money aside</h2>
+    <div class="small muted">Log money going toward one of your goals. It shows up in the Vault.</div>
+    <label class="f">Toward<select id="as-goal">${goals.map(x=>`<option value="${x.i}" ${x.i===sel?"selected":""}>${esc(x.g.name)}</option>`).join("")}</select></label>
+    <div class="kv small"><span class="muted">Saved so far</span><b>${m0(g.saved)}${+g.target?` of ${m0(g.target)}`:""}</b></div>
+    ${+g.target?`<div class="bar"><i style="width:${pct(g.saved,g.target)}%"></i></div>`:""}
+    <div class="row"><label class="f">Amount<input id="as-amt" inputmode="decimal" placeholder="0.00"></label>
+      <label class="f">Where it's coming from<select id="as-from">
+        <option value="none">Already in ${esc(lb.save)}</option>
+        <option value="new">New money (paycheck, cash)</option>
+        <option value="chase">Moving it from ${esc(lb.bills)}</option></select></label></div>
+    <button class="btn" type="submit">Set it aside</button>
+    ${last.length?`<div class="small muted">${last.map(x=>`${m0(x.amt)} to ${esc(x.goal)} · ${short(dn(x.date))}`).join("<br>")}</div>`:""}
+  </form>`;
+}
+document.addEventListener("change",e=>{if(e.target.id==="as-goal"){S.asideSel=+e.target.value;render()}});
+document.addEventListener("submit",e=>{
+  if(e.target.id!=="asidef")return;e.preventDefault();
+  const i=+val("as-goal"),g=S.plan?.goals?.[i],amt=num(val("as-amt")),from=val("as-from");
+  if(!g){toast("Pick a goal");return}if(!(amt>0)){toast("Enter the amount");return}
+  g.saved=Math.round(((+g.saved||0)+amt)*100)/100;
+  if(from==="new")acctAdjust("usaa",amt);
+  if(from==="chase"){acctAdjust("chase",-amt);acctAdjust("usaa",amt)}
+  S.plan.asideLog=(S.plan.asideLog||[]).concat([{goal:g.name,amt,from,date:todayS()}]).slice(-100);
+  S.asideSel=i;render();savePlan();toast(`${m0(amt)} set aside for ${g.name}`);
+});
+
 function weekTab(){
   const c=compute();
   const list=S.txns.filter(t=>wk(t.date)===c.cw).sort((a,b)=>b.ts-a.ts);
@@ -442,6 +474,7 @@ function weekTab(){
       ${c.cw===dn(todayS())?`<div class="muted small" style="margin-top:8px">A new week already started today.</div>`
         :`<button class="btn" data-act="newweek" style="margin-top:10px">Start new week</button>`}
     </div>
+    ${asideCard()}
     <button class="btn ghost" data-act="view" data-v="grace">Preview ${esc(NAMES.grace)}'s view</button>
   </section>`;
 }
@@ -1182,7 +1215,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202609300804";
+const BUILD="202609300810";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
