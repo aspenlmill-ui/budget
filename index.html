@@ -367,7 +367,7 @@ function txList(list,grace,noEmpty){
     <div class="muted small">${esc(poolName(t.pool))}${t.cat?" · "+esc(t.cat):""}${t.from==="cushion"?" · from cushion":""} · ${short(dn(t.date))}</div></div>
     ${t.receipt&&t.mine?`<button class="x" data-act="rview" data-path="${esc(t.receipt)}">Receipt</button>`:""}
     <b class="num">${m2(t.amount)}</b>
-    ${S.owner||t.mine?`<button class="x" data-act="deltx" data-id="${esc(t.id)}" aria-label="Delete">Delete</button>`:""}</div>`).join("")}</div>`;
+    ${S.full||t.mine?`<button class="x" data-act="deltx" data-id="${esc(t.id)}" aria-label="Delete">Delete</button>`:""}</div>`).join("")}</div>`;
 }
 
 function aspenView(){
@@ -445,7 +445,7 @@ function onboardSteps(){
     ["log","Log your first purchase","Home tab → Log a purchase.",S.txns.length>0,"week"]];
 }
 function gettingStarted(){
-  if(!S.owner||S.settings?.onboardDone)return "";
+  if(!S.full||S.settings?.onboardDone)return "";
   const st=onboardSteps(),done=st.filter(s=>s[3]).length;
   return `<div class="card"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px"><h2>Getting started</h2><span class="small muted">${done} of ${st.length}</span></div>
     <div class="bar" style="margin-bottom:8px"><i style="width:${pct(done,st.length)}%"></i></div>
@@ -814,7 +814,7 @@ function dueBeforePayday(acct){
   return sum;
 }
 function runAutopay(){
-  if(!S.owner||!S.plan)return;const P=S.plan,today=dn(todayS());
+  if(!S.full||!S.plan)return;const P=S.plan,today=dn(todayS());
   if(!P.autoStart){P.autoStart=todayS();savePlan()}
   const start=dn(P.autoStart),skip=new Set(P.skipAuto||[]);let changed=0;const paid=new Set(P.paid||[]);
   for(const r of billRows()){
@@ -1063,18 +1063,15 @@ function setupTab(){
         <button class="btn ghost" type="submit">Add category</button>
         <div class="muted small">To split money out of an existing card, lower that card's amount above so your total stays the same.</div></form>
     </div>
-    <div class="card"><h2>${esc(NAMES.grace)}'s view</h2>
-      <div class="small">When ${esc(NAMES.grace)} opens this page she sees only her own number, the ${esc(NAMES.household.toLowerCase())} number, her saved money, open special budgets and a place to log purchases. Bills, balances, debts and the plan are stored so only you can read them.</div>
-      <button class="btn ghost" data-act="view" data-v="grace" style="margin-top:10px">Preview ${esc(NAMES.grace)}'s view</button>
-    </div>
     ${S.owner?`<div class="card"><h2>What ${esc(NAMES.grace)} can see</h2><div class="seg" role="group" aria-label="Partner access">
       <button type="button" data-act="access" data-v="simple" aria-pressed="${!S.settings?.partnerFull}">Just their money</button>
       <button type="button" data-act="access" data-v="full" aria-pressed="${!!S.settings?.partnerFull}">Everything</button></div>
-      <div class="small muted" style="margin-top:8px">${S.settings?.partnerFull?`${esc(NAMES.grace)} sees the full app: bills, balances, savings, moving money. What each of you buys on your own card still stays private.`:`${esc(NAMES.grace)} sees only their card, the shared cards and special budgets. You keep bills, balances and savings to yourself.`}</div></div>`:""}
+      <div class="small muted" style="margin-top:8px">${S.settings?.partnerFull?`${esc(NAMES.grace)} has the same app you do: every tab, bills, balances, savings and moving money, and can change anything. The only thing kept private is what each of you writes down for a purchase on your own card.`:`${esc(NAMES.grace)} sees only their own card, plus whatever you turn on below.`}</div>
+      ${S.settings?.partnerFull?"":`<button class="btn ghost" data-act="view" data-v="grace" style="margin-top:10px">Preview ${esc(NAMES.grace)}'s screen</button>`}</div>`:""}
     ${S.owner&&!S.settings?.partnerFull?partnerShowCard():""}
     ${S.owner&&S.joinCode?`<div class="card"><h2>Invite ${esc(NAMES.grace)}</h2><div class="small muted">${esc(NAMES.grace)} creates an account in this app, picks "Join your partner" and types this code.</div>
       <div class="num" style="font-size:28px;font-weight:700;letter-spacing:.12em;margin-top:8px;user-select:all">${esc(S.joinCode)}</div></div>`:""}
-    ${S.owner&&S.plan?closingCard():""}
+    ${S.full&&S.plan?closingCard():""}
     <div class="card"><h2>Look</h2><div class="seg" role="group" aria-label="Color mode">
       ${[["light","Light"],["dark","Dark"],["auto","Match phone"]].map(([k,l])=>`<button type="button" data-act="theme" data-v="${k}" aria-pressed="${getTheme()===k}">${l}</button>`).join("")}</div></div>
     <div class="card"><h2>This phone</h2><div class="small muted">Get what's left every night at 7 PM, and the reload amounts the night before it resets.</div>
@@ -1495,7 +1492,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202609301254";
+const BUILD="202609301257";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
