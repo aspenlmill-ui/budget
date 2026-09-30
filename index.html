@@ -273,18 +273,19 @@ function graceView(){
     ${g.cushion>0?`<div class="chip">Saved from past weeks: ${m2(g.cushion)}</div>`:""}
     <div class="muted small">${esc(pretty(nextReset()))}: your card gets topped back up to ${m0(budgetFor("grace",nextReset()))}${g.left>0?`. The ${m2(g.left)} you have left counts as your saved money`:""}.</div>
   </div>
-  ${pp.includes("household")?`<div class="card pool st-${poolStatus(h,weekFrac(c))} ${h.left<0?"over":""}">
+  ${pp.includes("household")&&!hideCard("household")?`<div class="card pool st-${poolStatus(h,weekFrac(c))} ${h.left<0?"over":""}">
     <div class="bar" style="order:9"><i style="width:${pct(h.spent,h.alloc)}%"></i></div>
     <div class="label"><span class="sdot ${poolStatus(h,weekFrac(c))}"></span>${esc(NAMES.household)} ${PER().this}</div>
     <div class="left num">${m2(h.left)}</div>
     <div class="muted small">${esc(NOTES.household)}</div>
   </div>`:""}
-  ${partnerPools().filter(p=>p!=="household").map(p=>{const x=c[p],st=poolStatus(x,weekFrac(c));return `<div class="card pool st-${st} ${x.left<0?"over":""}">
+  ${partnerPools().filter(p=>p!=="household"&&!hideCard(p)).map(p=>{const x=c[p],st=poolStatus(x,weekFrac(c));return `<div class="card pool st-${st} ${x.left<0?"over":""}">
     <div class="label"><span class="sdot ${st}"></span>${esc(NAMES[p])} ${PER().this}</div><div class="left num">${m2(x.left)}</div>
     <div class="bar"><i style="width:${pct(x.spent,x.alloc)}%"></i></div></div>`}).join("")}
-  ${evs.map(e=>eventCard(e,false)).join("")}
+  ${evs.filter(e=>!hideCard("event:"+e.id)).map(e=>eventCard(e,false)).join("")}
   ${logForm(pool,true)}
   <div class="card"><h2>${cap(PER().this)}</h2>${txList(mine,true)}</div>
+  ${S.owner?"":homeCustomCard(true)}
   ${pushButton()}
   <button class="btn ghost" data-act="signout">Sign out</button>
   ${accountCard()}`;
@@ -334,7 +335,8 @@ function specialTab(){
 }
 
 function logForm(pool,grace){
-  const pools=(grace?["grace",...partnerPools()]:POOLS).concat((grace?partnerEvents():activeEvents()).map(e=>"event:"+e.id));
+  const all=(grace?["grace",...partnerPools()]:POOLS).concat((grace?partnerEvents():activeEvents()).map(e=>"event:"+e.id));
+  const shown=all.filter(k=>!hideLog(k)),pools=shown.length?shown:all;
   if(!pools.includes(pool))pool=pools[0];
   const isEv=String(pool).startsWith("event:");
   return `<form class="card" id="logf">
@@ -517,27 +519,27 @@ function weekTab(){
   const pool=S.aPool||"aspen";
   const f=weekFrac(c);
   return `<section>
-    ${dueTodayCard()}
+    ${hideSec("bills")?"":dueTodayCard()}
     ${gettingStarted()}
-    ${statusBanner(c,POOLS)}
+    ${hideSec("status")?"":statusBanner(c,POOLS)}
     ${rescueBanner(c)}
-    <div class="pools">${POOLS.map(p=>{const x=c[p],st=poolStatus(x,f);return `<div class="card pool st-${st} ${x.left<0?"over":""}">
+    ${hideSec("cards")?"":`<div class="pools">${POOLS.filter(p=>!hideCard(p)).map(p=>{const x=c[p],st=poolStatus(x,f);return `<div class="card pool st-${st} ${x.left<0?"over":""}">
       <div class="label"><span class="sdot ${st}"></span>${NAMES[p]}</div>
       <div class="left num">${m2(x.left)}</div>
       <div class="bar"><i style="width:${pct(x.spent,x.alloc)}%"></i></div>
       <div class="muted small">${m0(x.spent)} of ${m0(x.alloc)}${x.alloc!==x.budget?` <span title="Includes money moved">(budget ${m0(x.budget)})</span>`:""}</div>
       <span class="chip ${x.cushion<0?"bad":""}">Splurge ${m2(x.cushion)}</span></div>`}).join("")}</div>
-    <div class="muted small">Cushion is what was left over before. Unspent money rolls in when the ${PER().noun} resets; overspending comes out of it.</div>
-    ${logForm(pool,false)}
-    <div class="card"><h2>${cap(PER().this)}: purchases</h2>${txList(list,false)}</div>
-    ${reloadCard(c)}
-    <div class="card"><h2>Start a new ${PER().noun}</h2>
+    <div class="muted small">Splurge is what was left over before. Unspent money rolls in when the ${PER().noun} resets; overspending comes out of it.</div>`}
+    ${hideSec("log")?"":logForm(pool,false)}
+    ${hideSec("purchases")?"":`<div class="card"><h2>${cap(PER().this)}: purchases</h2>${txList(list,false)}</div>`}
+    ${hideSec("reload")?"":reloadCard(c)}
+    ${hideSec("newperiod")?"":`<div class="card"><h2>Start a new ${PER().noun}</h2>
       <div class="small">It resets on its own ${esc(pretty(nextReset()))}. Start one now if it's payday or you want a fresh start early. Whatever's left (${m2(POOLS.reduce((s,p)=>s+c[p].left,0))} total) moves into the cushions, and every card refills to its full weekly amount.</div>
       ${c.cw===dn(todayS())?`<div class="muted small" style="margin-top:8px">A new ${PER().noun} already started today.</div>`
         :`<button class="btn" data-act="newweek" style="margin-top:10px">Start new ${PER().noun}</button>`}
-    </div>
-    ${spendCard()}
-    <button class="btn ghost" data-act="view" data-v="grace">Preview ${esc(NAMES.grace)}'s view</button>
+    </div>`}
+    ${hideSec("spend")?"":spendCard()}
+    ${homeCustomCard(false)}
   </section>`;
 }
 
@@ -1110,6 +1112,8 @@ document.addEventListener("click",async e=>{
   if(a==="rview"){viewReceipt(b.dataset.path);return}
   if(a==="gsgo"||a==="gsdone"){const k=b.dataset.k;if(S.plan&&["buckets","partner","home"].includes(k)){S.plan.onboard={...(S.plan.onboard||{}),[k]:true};savePlan()}
     if(a==="gsgo"){S.tab=b.dataset.t;window.scrollTo(0,0)}render();return}
+  if(a==="hpref"){const g=b.dataset.g,k=b.dataset.k,on=b.dataset.v==="1";S.prefs=S.prefs||{};const h=S.prefs.home=S.prefs.home||{};
+    const set=new Set(h[g]||[]);on?set.delete(k):set.add(k);h[g]=[...set];render();savePrefs();return}
   if(a==="pshow"){const k=b.dataset.k,on=b.dataset.v==="1";
     try{if(k.startsWith("custom:")){const id=k.slice(7);await saveSettings({custom:(S.settings.custom||[]).map(c=>c.id===id?{...c,shared:on}:c)})}
       else{const h=new Set(S.settings?.partnerHide||[]);on?h.delete(k):h.add(k);await saveSettings({partnerHide:[...h]})}
@@ -1329,6 +1333,25 @@ function partnerShowCard(){
     <div class="list">${rows.map(r=>`<div class="item"><div class="grow"><div>${esc(r.name)}</div><div class="small muted">${r.kind}</div></div>
       <div class="seg" role="group" aria-label="${esc(r.name)}" style="min-width:128px"><button type="button" data-act="pshow" data-k="${esc(r.k)}" data-v="1" aria-pressed="${r.on}">Show</button><button type="button" data-act="pshow" data-k="${esc(r.k)}" data-v="0" aria-pressed="${!r.on}">Hide</button></div></div>`).join("")}</div></div>`;
 }
+/* ---------- per-person Home screen choices (saved to your own account) ---------- */
+const HOME_SECTIONS=[["bills","Bills due today"],["status","How it's going (status)"],["cards","Budget cards"],["log","Log a purchase"],["purchases","This period's purchases"],["reload","Refill amounts"],["newperiod","Start a new period"],["spend","Pay for something from a budget"]];
+function hp(){return S.prefs?.home||{}}
+function hideSec(k){return (hp().hide||[]).includes(k)}
+function hideCard(k){return (hp().cards||[]).includes(k)}
+function hideLog(k){return (hp().log||[]).includes(k)}
+async function savePrefs(){try{chk(await sb.from("wb_prefs").upsert({user_id:ME,data:S.prefs||{},updated_at:new Date().toISOString()}))}catch(err){fail(err)}}
+function hTog(g,k,label,sub,on){return `<div class="item"><div class="grow"><div>${esc(label)}</div>${sub?`<div class="small muted">${esc(sub)}</div>`:""}</div>
+  <div class="seg" role="group" aria-label="${esc(label)}" style="min-width:128px"><button type="button" data-act="hpref" data-g="${g}" data-k="${esc(k)}" data-v="1" aria-pressed="${on}">Show</button><button type="button" data-act="hpref" data-g="${g}" data-k="${esc(k)}" data-v="0" aria-pressed="${!on}">Hide</button></div></div>`}
+function homeCustomCard(simple){
+  const logKeys=simple?["grace",...partnerPools()].concat(partnerEvents().map(e=>"event:"+e.id)):POOLS.concat(activeEvents().map(e=>"event:"+e.id));
+  const lname=k=>simple&&k==="grace"?"Mine":poolName(k);
+  return `<details class="card"><summary><b>Customize my Home screen</b> <span class="small muted">· only changes your screen</span></summary>
+    ${simple?"":`<div class="label" style="margin-top:12px">Sections</div><div class="list">${HOME_SECTIONS.map(([k,l])=>hTog("hide",k,l,"",!hideSec(k))).join("")}</div>
+    <div class="label" style="margin-top:12px">Budget cards</div><div class="list">${POOLS.map(p=>hTog("cards",p,NAMES[p],"",!hideCard(p))).join("")}</div>`}
+    ${simple?`<div class="label" style="margin-top:12px">Cards</div><div class="list">${partnerPools().map(p=>hTog("cards",p,NAMES[p],"",!hideCard(p))).join("")}${partnerEvents().map(e=>hTog("cards","event:"+e.id,e.name,"Special budget",!hideCard("event:"+e.id))).join("")}</div>`:""}
+    <div class="label" style="margin-top:12px">Buttons under "Log a purchase"</div><div class="list">${logKeys.map(k=>hTog("log",k,lname(k),k.startsWith("event:")?"Special budget":"",!hideLog(k))).join("")}</div>
+  </details>`;
+}
 function seesP(k){return !(S.settings?.partnerHide||[]).includes(k)}
 function partnerPools(){return [...(seesP("household")?["household"]:[]),...customs().filter(c=>c.shared).map(c=>c.id)]}
 function partnerEvents(){return activeEvents().filter(e=>seesP("event:"+e.id))}
@@ -1492,7 +1515,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202609301257";
+const BUILD="202609301301";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
@@ -1604,6 +1627,7 @@ async function start(){
   S.owner=hh?.created_by===ME;
   try{await LOAD.settings();await Promise.all(Object.entries(LOAD).filter(([k])=>k!=="settings").map(([,f])=>f()))}catch(err){fail(err)}
   S.full=S.owner||!!S.settings?.partnerFull;S.view=S.full?"aspen":"grace";S.aPool=S.owner?"aspen":"grace";
+  try{const pr=await sb.from("wb_prefs").select("data").eq("user_id",ME).maybeSingle();S.prefs=pr.data?.data||{}}catch(_){S.prefs={}}
   S.ready=true;render();runAutopay();syncTZ();
   if(channel)sb.removeChannel(channel);
   channel=sb.channel("wb-"+HID);
