@@ -121,6 +121,8 @@ input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid 
 .rthumb{width:44px;height:44px;object-fit:cover;border-radius:8px;border:1px solid var(--line)}
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:calc(16px + env(safe-area-inset-top,0px)) 16px calc(16px + env(safe-area-inset-bottom,0px))}
 .overlay img{max-width:100%;max-height:80vh;border-radius:10px}
+.fixes{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.fixes li{display:flex;gap:10px;align-items:center;padding:9px 0;border-top:1px solid color-mix(in srgb,var(--bad) 20%,transparent)}.fixes li:first-child{border-top:0}
 .dot{width:10px;height:10px;border-radius:50%;border:2px solid var(--line);flex-shrink:0}
 .dot.ok{background:var(--good);border-color:var(--good)}
 .dot.late{border-color:var(--bad)}
@@ -368,19 +370,30 @@ function aspenView(){
   ${body}`;
 }
 
+function rescueOptions(c,p){
+  const need=Math.round(-c[p].left*100)/100,opts=[];
+  const add=(ep,label,avail,why,tier)=>{if(avail>0.004)opts.push({ep,label,amt:Math.round(Math.min(need,avail)*100)/100,full:avail>=need-0.004,why,tier})};
+  const f=weekFrac(c);
+  add(`cushion:${p}`,`${NAMES[p]}'s splurge`,c[p].cushion,"Your own saved leftovers. Nothing else changes.",1);
+  if(p!=="extras"){add("week:extras",`${NAMES.extras} ${PER().this}`,c.extras.left,"That's what Extras is for.",2);add("cushion:extras",`${NAMES.extras} splurge`,c.extras.cushion,"Saved odds-and-ends money.",2)}
+  for(const q of POOLS)if(q!==p&&q!=="extras")add(`cushion:${q}`,`${NAMES[q]}'s splurge`,c[q].cushion,`Uses ${NAMES[q]}'s saved leftovers.`,3);
+  for(const q of POOLS)if(q!==p&&q!=="extras"){const room=c[q].left-Math.max(0,c[q].alloc*(1-f));add(`week:${q}`,`${NAMES[q]} ${PER().this}`,Math.max(0,room),`${NAMES[q]} is under pace, so there's room.`,4)}
+  if(S.plan){const P=S.plan,bal=+P.accounts?.usaa||0,inB=(P.goals||[]).filter(g=>!g.done).reduce((s,g)=>s+(+g.saved||0),0),free=Math.max(0,bal-Math.max(+P.floor||0,0)-inB);
+    add("usaa",`${L().save} (unassigned savings)`,free,"Real savings. Use it if nothing above covers it.",5)}
+  opts.sort((a,b)=>a.tier-b.tier||b.amt-a.amt);
+  return {need,opts};
+}
 function rescueBanner(c){
   const over=POOLS.filter(p=>c[p].left<-0.004);
   if(!over.length)return "";
   return over.map(p=>{
-    const need=Math.round(-c[p].left*100)/100;
-    const opts=[];
-    if(c[p].cushion>0)opts.push([`cushion:${p}`,`${NAMES[p]}'s cushion`,Math.min(need,c[p].cushion)]);
-    for(const q of POOLS)if(q!==p&&c[q].cushion>0)opts.push([`cushion:${q}`,`${NAMES[q]}'s cushion`,Math.min(need,c[q].cushion)]);
-    for(const q of POOLS)if(q!==p&&c[q].left>0)opts.push([`week:${q}`,`${NAMES[q]} ${PER().this}`,Math.min(need,c[q].left)]);
-    opts.push(["usaa",(S.plan?L().save:"Savings")+" savings",need]);
+    const {need,opts}=rescueOptions(c,p),best=opts[0];
     return `<div class="alert"><div><strong>${esc(NAMES[p])} is ${m2(need)} over ${PER().this}.</strong>
-      <div class="small">Cover it from one of these, starting with the cushion. If you leave it, it comes out of ${esc(NAMES[p])}'s cushion when the ${PER().noun} resets.</div></div>
-      <div class="opts">${opts.slice(0,4).map(o=>`<button class="btn sm ${o[0]==="usaa"?"ghost":""}" data-act="rescue" data-from="${o[0]}" data-to="week:${p}" data-amt="${o[2]}">${m2(o[2])} from ${esc(o[1])}</button>`).join("")}</div></div>`;
+      <div class="small">Ways to fix it, best first:</div></div>
+      <ol class="fixes">${opts.slice(0,5).map((o,i)=>`<li><div class="grow"><b>${i===0?"Best: ":""}${m2(o.amt)} from ${esc(o.label)}</b>${o.full?"":` <span class="small muted">(covers part)</span>`}<div class="small muted">${esc(o.why)}</div></div>
+        <button class="btn sm ${i===0?"":"ghost"}" data-act="rescue" data-from="${o.ep}" data-to="week:${p}" data-amt="${o.amt}">Use</button></li>`).join("")}
+        <li><div class="grow"><b>${opts.length?"Last resort: ":""}Leave it</b><div class="small muted">It comes out of ${esc(NAMES[p])}'s splurge when the ${PER().noun} resets${c[p].cushion+c[p].left<0?`, which puts it ${m2(-(c[p].cushion+c[p].left))} in the hole`:""}.</div></div></li></ol>
+      ${best&&!best.full?`<div class="small">No single option covers all of it. Tap one, then the next, until it's covered.</div>`:""}</div>`;
   }).join("");
 }
 
@@ -1306,7 +1319,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202609300825";
+const BUILD="202609300828";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
