@@ -258,8 +258,8 @@ function weekLine(c){const n=nextReset();return `${PER().label} · since ${short
 function graceView(){
   const c=compute(),g=c.grace,h=c.household;
   const pool=S.gPool;
-  const pp=partnerPools();const mine=S.txns.filter(t=>(t.pool==="grace"||pp.includes(t.pool)||String(t.pool).startsWith("event:"))&&wk(t.date)===c.cw).sort((a,b)=>b.ts-a.ts);
-  const evs=activeEvents();
+  const pp=partnerPools(),evs=partnerEvents(),evk=evs.map(e=>"event:"+e.id);
+  const mine=S.txns.filter(t=>(t.pool==="grace"||pp.includes(t.pool)||evk.includes(t.pool))&&wk(t.date)===c.cw).sort((a,b)=>b.ts-a.ts);
   return `
   <header><div><div class="label">${esc(weekLine(c))}</div><h1 class="brand"><img src="icon.svg" alt="" class="logo">${esc(NAMES.grace)}'s money</h1></div>
     ${S.owner?`<button class="btn ghost sm" data-act="view" data-v="aspen">Back to my view</button>`:""}</header>
@@ -273,12 +273,12 @@ function graceView(){
     ${g.cushion>0?`<div class="chip">Saved from past weeks: ${m2(g.cushion)}</div>`:""}
     <div class="muted small">${esc(pretty(nextReset()))}: your card gets topped back up to ${m0(budgetFor("grace",nextReset()))}${g.left>0?`. The ${m2(g.left)} you have left counts as your saved money`:""}.</div>
   </div>
-  <div class="card pool st-${poolStatus(h,weekFrac(c))} ${h.left<0?"over":""}">
+  ${pp.includes("household")?`<div class="card pool st-${poolStatus(h,weekFrac(c))} ${h.left<0?"over":""}">
     <div class="bar" style="order:9"><i style="width:${pct(h.spent,h.alloc)}%"></i></div>
     <div class="label"><span class="sdot ${poolStatus(h,weekFrac(c))}"></span>${esc(NAMES.household)} ${PER().this}</div>
     <div class="left num">${m2(h.left)}</div>
     <div class="muted small">${esc(NOTES.household)}</div>
-  </div>
+  </div>`:""}
   ${partnerPools().filter(p=>p!=="household").map(p=>{const x=c[p],st=poolStatus(x,weekFrac(c));return `<div class="card pool st-${st} ${x.left<0?"over":""}">
     <div class="label"><span class="sdot ${st}"></span>${esc(NAMES[p])} ${PER().this}</div><div class="left num">${m2(x.left)}</div>
     <div class="bar"><i style="width:${pct(x.spent,x.alloc)}%"></i></div></div>`}).join("")}
@@ -326,7 +326,7 @@ function specialTab(){
 }
 
 function logForm(pool,grace){
-  const pools=(grace?["grace",...partnerPools()]:POOLS).concat(activeEvents().map(e=>"event:"+e.id));
+  const pools=(grace?["grace",...partnerPools()]:POOLS).concat((grace?partnerEvents():activeEvents()).map(e=>"event:"+e.id));
   if(!pools.includes(pool))pool=pools[0];
   const isEv=String(pool).startsWith("event:");
   return `<form class="card" id="logf">
@@ -1063,6 +1063,7 @@ function setupTab(){
       <button type="button" data-act="access" data-v="simple" aria-pressed="${!S.settings?.partnerFull}">Just their money</button>
       <button type="button" data-act="access" data-v="full" aria-pressed="${!!S.settings?.partnerFull}">Everything</button></div>
       <div class="small muted" style="margin-top:8px">${S.settings?.partnerFull?`${esc(NAMES.grace)} sees the full app: bills, balances, savings, moving money. What each of you buys on your own card still stays private.`:`${esc(NAMES.grace)} sees only their card, the shared cards and special budgets. You keep bills, balances and savings to yourself.`}</div></div>`:""}
+    ${S.owner&&!S.settings?.partnerFull?partnerShowCard():""}
     ${S.owner&&S.joinCode?`<div class="card"><h2>Invite ${esc(NAMES.grace)}</h2><div class="small muted">${esc(NAMES.grace)} creates an account in this app, picks "Join your partner" and types this code.</div>
       <div class="num" style="font-size:28px;font-weight:700;letter-spacing:.12em;margin-top:8px;user-select:all">${esc(S.joinCode)}</div></div>`:""}
     ${S.owner&&S.plan?closingCard():""}
@@ -1087,7 +1088,7 @@ function firstRun(){
 function setPath(obj,path,val){const k=path.split(".");let o=obj;for(let i=0;i<k.length-1;i++){o=o[k[i]]??(o[k[i]]={})}o[k[k.length-1]]=val}
 let planQ=Promise.resolve();
 function savePlan(){const body=JSON.parse(JSON.stringify(S.plan));planQ=planQ.then(()=>db.doc("private/plan").set(body)).catch(fail);return planQ}
-async function saveSettings(patch){const cur=S.settings||{};const body={anchor:cur.anchor||anchor(),history:cur.history||[],starts:cur.starts||[],names:cur.names||{},title:cur.title||"",custom:cur.custom||[],periods:cur.periods||[{from:cur.anchor||anchor(),kind:"week"}],onboardDone:!!cur.onboardDone,partnerFull:!!cur.partnerFull,...patch};
+async function saveSettings(patch){const cur=S.settings||{};const body={anchor:cur.anchor||anchor(),history:cur.history||[],starts:cur.starts||[],names:cur.names||{},title:cur.title||"",custom:cur.custom||[],periods:cur.periods||[{from:cur.anchor||anchor(),kind:"week"}],onboardDone:!!cur.onboardDone,partnerFull:!!cur.partnerFull,partnerHide:cur.partnerHide||[],...patch};
   await db.doc("settings/budget").set(JSON.parse(JSON.stringify(body)))}
 function arm(b,label){if(b.classList.contains("armed"))return true;b.classList.add("armed");b.dataset.t0=b.textContent;b.textContent=label||"Tap again";setTimeout(()=>{b.classList.remove("armed");b.textContent=b.dataset.t0},3500);return false}
 
@@ -1104,6 +1105,10 @@ document.addEventListener("click",async e=>{
   if(a==="rview"){viewReceipt(b.dataset.path);return}
   if(a==="gsgo"||a==="gsdone"){const k=b.dataset.k;if(S.plan&&["buckets","partner","home"].includes(k)){S.plan.onboard={...(S.plan.onboard||{}),[k]:true};savePlan()}
     if(a==="gsgo"){S.tab=b.dataset.t;window.scrollTo(0,0)}render();return}
+  if(a==="pshow"){const k=b.dataset.k,on=b.dataset.v==="1";
+    try{if(k.startsWith("custom:")){const id=k.slice(7);await saveSettings({custom:(S.settings.custom||[]).map(c=>c.id===id?{...c,shared:on}:c)})}
+      else{const h=new Set(S.settings?.partnerHide||[]);on?h.delete(k):h.add(k);await saveSettings({partnerHide:[...h]})}
+      toast(on?`${NAMES.grace} can see it`:`Hidden from ${NAMES.grace}`)}catch(err){fail(err)}return}
   if(a==="access"){try{await saveSettings({partnerFull:b.dataset.v==="full"});toast(b.dataset.v==="full"?`${NAMES.grace} can now see everything`:`${NAMES.grace} sees just their money`)}catch(err){fail(err)}return}
   if(a==="gshide"){if(!arm(b,"Tap again to hide"))return;try{await saveSettings({onboardDone:true})}catch(err){fail(err)}return}
   if(a==="tab"){S.tab=b.dataset.t;try{localStorage.setItem("mfb-tab",S.tab)}catch(_){}render();return}
@@ -1298,7 +1303,19 @@ document.addEventListener("submit",async e=>{
 
 /* ---------- boot ---------- */
 function customs(){return (S.settings?.custom||[]).filter(c=>!c.archived)}
-function partnerPools(){return ["household",...customs().filter(c=>c.shared).map(c=>c.id)]}
+function partnerShowCard(){
+  const hide=S.settings?.partnerHide||[];
+  const rows=[{k:"household",name:NAMES.household,kind:"Shared card",on:!hide.includes("household")},
+    ...customs().map(c=>({k:"custom:"+c.id,name:c.name,kind:"Category",on:!!c.shared})),
+    ...activeEvents().map(e=>({k:"event:"+e.id,name:e.name,kind:"Special budget",on:!hide.includes("event:"+e.id)}))];
+  return `<div class="card"><h2>Show on ${esc(NAMES.grace)}'s screen</h2>
+    <div class="small muted" style="margin-bottom:6px">${esc(NAMES.grace)} always sees ${esc(NAMES.grace)}'s own card. Turn the rest on or off. What's hidden also comes off ${esc(NAMES.grace)}'s 7 PM notification.</div>
+    <div class="list">${rows.map(r=>`<div class="item"><div class="grow"><div>${esc(r.name)}</div><div class="small muted">${r.kind}</div></div>
+      <div class="seg" role="group" aria-label="${esc(r.name)}" style="min-width:128px"><button type="button" data-act="pshow" data-k="${esc(r.k)}" data-v="1" aria-pressed="${r.on}">Show</button><button type="button" data-act="pshow" data-k="${esc(r.k)}" data-v="0" aria-pressed="${!r.on}">Hide</button></div></div>`).join("")}</div></div>`;
+}
+function seesP(k){return !(S.settings?.partnerHide||[]).includes(k)}
+function partnerPools(){return [...(seesP("household")?["household"]:[]),...customs().filter(c=>c.shared).map(c=>c.id)]}
+function partnerEvents(){return activeEvents().filter(e=>seesP("event:"+e.id))}
 function applyNames(){const n=S.settings?.names||{};NAMES.household=n.household||"Household";NAMES.aspen=n.aspen||"Me";NAMES.grace=n.grace||"Partner";NAMES.extras=n.extras||"Extras";
   POOLS=[...BASE];for(const c of customs()){POOLS.push(c.id);NAMES[c.id]=c.name;NOTES[c.id]=c.shared?`Shared with ${NAMES.grace}`:"Only you see this"}}
 /* ---------- Friday reload ---------- */
@@ -1459,7 +1476,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202609301229";
+const BUILD="202609301251";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);

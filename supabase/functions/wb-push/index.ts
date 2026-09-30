@@ -83,7 +83,7 @@ function summarize(settings: any, txns: any[], moves: any[], events: any[], toda
     const s = txns.filter((x) => x.pool === key).reduce((s2, x) => s2 + +x.amount, 0);
     return { name: e.name, left: b - s };
   });
-  return { out, names, customs, ev, resetTomorrow: next === t + 1, frac: Math.min(1, Math.max(0, (t - cw + 1) / Math.max(1, next - cw))) };
+  return { out, names, customs, ev, hide: settings.partnerHide || [], resetTomorrow: next === t + 1, frac: Math.min(1, Math.max(0, (t - cw + 1) / Math.max(1, next - cw))) };
 }
 
 // 5 PM check. Bills you pay yourself: asked on the due date, or 2 days before month end if there is no due date.
@@ -199,9 +199,9 @@ Deno.serve(async (req) => {
     const c = cache[ck] as any;
     if (!c) { failed++; continue; }
     const isOwner = c.owner === sub.user_id;
-    const { out, names, resetTomorrow, frac } = c.s;
+    const { out, names, hide, resetTomorrow, frac } = c.s;
     // Nightly: just your own money and Household.
-    const pools: string[] = [isOwner ? "aspen" : "grace", "household"];
+    const pools: string[] = isOwner ? ["aspen", "household"] : ["grace", ...(hide.includes("household") ? [] : ["household"])];
     const label = (p: string) => (p === (isOwner ? "aspen" : "grace") ? "My Money" : names[p]);
     let title: string, body: string;
     if (resetTomorrow) {
