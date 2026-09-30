@@ -79,6 +79,7 @@ input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid 
 .seg{display:flex;gap:6px}
 .seg button{flex:1;font:600 14px var(--body);padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink);cursor:pointer}
 .seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.gtabs{flex-wrap:wrap;gap:8px;margin-bottom:12px}.gtabs button{flex:1 1 30%;font:700 16px var(--body);padding:14px 10px;border-radius:14px;background:var(--surface)}
 .list{display:flex;flex-direction:column}
 .item{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
 .item:first-child{border-top:0}
@@ -256,35 +257,39 @@ function render(){
 function weekLine(c){const n=nextReset();return `${PER().label} · since ${short(c.cw)} · refills ${pretty(n)}`}
 
 function graceView(){
-  const c=compute(),g=c.grace,h=c.household;
-  const pool=S.gPool;
-  const pp=partnerPools(),evs=partnerEvents(),evk=evs.map(e=>"event:"+e.id);
-  const mine=S.txns.filter(t=>(t.pool==="grace"||pp.includes(t.pool)||evk.includes(t.pool))&&wk(t.date)===c.cw).sort((a,b)=>b.ts-a.ts);
+  const c=compute(),pp=partnerPools().filter(p=>!hideCard(p)),evs=partnerEvents().filter(e=>!hideCard("event:"+e.id));
+  const tabs=[["grace","My Money"],...pp.map(p=>[p,NAMES[p]]),...evs.map(e=>["event:"+e.id,e.name])];
+  const tab=tabs.some(t=>t[0]===S.gTab)?S.gTab:"grace",isEv=tab.startsWith("event:");
+  const tname=tabs.find(t=>t[0]===tab)[1];
+  let left,spent,of,sub;
+  if(isEv){const st=evStats(S.events.find(e=>"event:"+e.id===tab));left=st.left;spent=st.spent;of=st.budget;sub="Special budget"}
+  else{const x=c[tab];left=x.left;spent=x.spent;of=x.alloc;sub=`${cap(PER().this)} · refills ${pretty(nextReset())}`}
+  const hist=S.txns.filter(t=>t.pool===tab&&t.from!=="cushion").sort((a,b)=>b.ts-a.ts).slice(0,40);
+  const who=tab==="grace"?NAMES.grace:tname;
   return `
-  <header><div><div class="label">${esc(weekLine(c))}</div><h1 class="brand"><img src="icon.svg" alt="" class="logo">${esc(NAMES.grace)}'s money</h1></div>
-    ${S.owner?`<button class="btn ghost sm" data-act="view" data-v="aspen">Back to my view</button>`:""}</header>
-  ${statusBanner(c,["grace",...pp])}
-  <div class="card hero st-${poolStatus(g,weekFrac(c))} ${g.left<0?"over":""}">
-    <div class="label">You can spend ${PER().this}</div>
-    <div class="big num">${m2(Math.max(g.left,g.left<0?g.left:0))}</div>
-    ${g.left<0?`<div class="chip bad">${m2(-g.left)} over. Let ${esc(NAMES.aspen)} know so money can be moved to cover it.</div>`
-      :`<div class="muted small">${m0(g.spent)} spent of ${m0(g.alloc)}</div>`}
-    <div class="bar"><i style="width:${pct(g.spent,g.alloc)}%"></i></div>
-    ${g.cushion>0?`<div class="chip">Saved from past weeks: ${m2(g.cushion)}</div>`:""}
-    <div class="muted small">${esc(pretty(nextReset()))}: your card gets topped back up to ${m0(budgetFor("grace",nextReset()))}${g.left>0?`. The ${m2(g.left)} you have left counts as your saved money`:""}.</div>
+  ${S.owner?`<header><div><div class="label">Preview</div><h1 class="brand"><img src="icon.svg" alt="" class="logo">${esc(NAMES.grace)}'s screen</h1></div><button class="btn ghost sm" data-act="view" data-v="aspen">Back to my view</button></header>`:""}
+  <nav class="seg gtabs" role="tablist" style="margin-top:4px">${tabs.map(([k,l])=>`<button type="button" role="tab" data-act="gtab" data-k="${esc(k)}" aria-pressed="${k===tab}">${esc(l)}</button>`).join("")}</nav>
+  <div class="card hero ${left<0?"over":""}">
+    <div class="label">${esc(who)} money left</div>
+    <div class="big num">${m2(left)}</div>
+    <div class="muted">${m2(spent)} spent of ${m2(of)}</div>
+    <div class="muted small">${esc(sub)}</div>
+    ${left<0?`<div class="chip bad" style="margin-top:6px">${m2(-left)} over. Let ${esc(NAMES.aspen)} know so money can be moved.</div>`:""}
+    ${tab==="grace"&&c.grace.cushion>0?`<div class="chip" style="margin-top:6px">Saved from past ${esc(PER().noun)}s: ${m2(c.grace.cushion)}</div>`:""}
   </div>
-  ${pp.includes("household")&&!hideCard("household")?`<div class="card pool st-${poolStatus(h,weekFrac(c))} ${h.left<0?"over":""}">
-    <div class="bar" style="order:9"><i style="width:${pct(h.spent,h.alloc)}%"></i></div>
-    <div class="label"><span class="sdot ${poolStatus(h,weekFrac(c))}"></span>${esc(NAMES.household)} ${PER().this}</div>
-    <div class="left num">${m2(h.left)}</div>
-    <div class="muted small">${esc(NOTES.household)}</div>
-  </div>`:""}
-  ${partnerPools().filter(p=>p!=="household"&&!hideCard(p)).map(p=>{const x=c[p],st=poolStatus(x,weekFrac(c));return `<div class="card pool st-${st} ${x.left<0?"over":""}">
-    <div class="label"><span class="sdot ${st}"></span>${esc(NAMES[p])} ${PER().this}</div><div class="left num">${m2(x.left)}</div>
-    <div class="bar"><i style="width:${pct(x.spent,x.alloc)}%"></i></div></div>`}).join("")}
-  ${evs.filter(e=>!hideCard("event:"+e.id)).map(e=>eventCard(e,false)).join("")}
-  ${logForm(pool,true)}
-  <div class="card"><h2>${cap(PER().this)}</h2>${txList(mine,true)}</div>
+  <form class="card form" id="gpf" data-pool="${esc(tab)}">
+    <h2>Add ${tab==="grace"?"personal":esc(tname.toLowerCase())} purchase</h2>
+    <label class="f">Amount<input id="gp-amt" inputmode="decimal" autocomplete="off"></label>
+    <label class="f">What was it?<input id="gp-note" placeholder="${tab==="household"?"Groceries, dinner out, dog food...":"Gas, dinner, coffee..."}" autocomplete="off"></label>
+    ${tab==="household"?`<label class="f">Category<select id="gp-cat">${HCATS.map(x=>`<option>${x}</option>`).join("")}</select></label>`:""}
+    <button class="btn" type="submit">Subtract from ${esc(tab==="grace"?"My Money":tname)}</button>
+  </form>
+  <div class="card"><h2>${tab==="grace"?"My purchase history":esc(tname)+" history"}</h2>
+    ${hist.length?`<div class="list">${hist.map(t=>`<div class="item"><div class="grow"><div><b>${esc(t.note||t.cat||"Purchase")}</b></div>
+      <div class="muted small">${esc(new Date(t.ts||Date.parse(t.date+"T12:00:00")).toLocaleString("en-US",{month:"numeric",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit"}))}</div></div>
+      <b class="num">-${m2(t.amount)}</b>${t.mine?`<button class="x" data-act="deltx" data-id="${esc(t.id)}" aria-label="Delete">✕</button>`:""}</div>`).join("")}</div>`
+      :`<div class="muted small">Nothing yet.</div>`}
+  </div>
   ${S.owner?"":homeCustomCard(true)}
   ${pushButton()}
   <button class="btn ghost" data-act="signout">Sign out</button>
@@ -1166,6 +1171,7 @@ document.addEventListener("click",async e=>{
   if(a==="inctdel"){if(!arm(b,"Tap again to remove"))return;S.plan.incomeTypes=(S.plan.incomeTypes||[]).filter(t=>t.k!==b.dataset.k);if(S.depSrc===b.dataset.k)S.depSrc="mine";render();savePlan();return}
   if(a==="depadd"){const r=depRuleSet(S.depSrc||"mine");r.splits=[...(r.splits||[]),{to:acctList().find(x=>x.k!==r.home)?.k||"usaa",amt:0}];render();savePlan();return}
   if(a==="depdel"){const r=depRuleSet(S.depSrc||"mine");r.splits.splice(+b.dataset.i,1);render();savePlan();return}
+  if(a==="gtab"){S.gTab=b.dataset.k;render();return}
   if(a==="pshow"){const k=b.dataset.k,on=b.dataset.v==="1";
     try{if(k.startsWith("custom:")){const id=k.slice(7);await saveSettings({custom:(S.settings.custom||[]).map(c=>c.id===id?{...c,shared:on}:c)})}
       else{const h=new Set(S.settings?.partnerHide||[]);on?h.delete(k):h.add(k);await saveSettings({partnerHide:[...h]})}
@@ -1290,6 +1296,12 @@ document.addEventListener("submit",async e=>{
   if(f.id==="evedf"){const name=val("ee-name").trim().slice(0,60),amt=num(val("ee-amt"));
     if(!name||!(amt>=0)){toast("Add a name and an amount");return}
     try{await db.doc("events/"+f.dataset.id).update({name,budget:amt});S.evEdit=null;render();toast("Saved")}catch(err){fail(err)}}
+  if(f.id==="gpf"){const amt=num(val("gp-amt"));if(!(amt>0)){toast("Enter the amount");return}if(logBusy)return;logBusy=true;
+    const pool=f.dataset.pool,note=val("gp-note").trim().slice(0,80),cat=val("gp-cat");
+    const btn=f.querySelector('button[type="submit"]');if(btn){btn.disabled=true;btn.textContent="Saving…"}
+    document.getElementById("gp-amt").value="";document.getElementById("gp-note").value="";
+    try{await db.collection("txns").add({pool,amount:amt,note,cat,from:"week",date:todayS(),ts:Date.now(),by:S.owner?"owner":"partner"});logBusy=false;toast(`Saved ${m2(amt)}${note?" · "+note:""}`);render()}
+    catch(err){logBusy=false;render();fail(err)}}
   if(f.id==="logf"){
     const amt=num(val("lf-amt"));if(!(amt>0)){toast("Enter the amount");return}
     const pool=document.querySelector('#logf [data-act="pool"][aria-pressed="true"]')?.dataset.p||"aspen";
@@ -1409,8 +1421,8 @@ function homeCustomCard(simple){
   return `<details class="card"><summary><b>Customize my Home screen</b> <span class="small muted">· only changes your screen</span></summary>
     ${simple?"":`<div class="label" style="margin-top:12px">Sections</div><div class="list">${HOME_SECTIONS.map(([k,l])=>hTog("hide",k,l,"",!hideSec(k))).join("")}</div>
     <div class="label" style="margin-top:12px">Budget cards</div><div class="list">${POOLS.map(p=>hTog("cards",p,NAMES[p],"",!hideCard(p))).join("")}</div>`}
-    ${simple?`<div class="label" style="margin-top:12px">Cards</div><div class="list">${partnerPools().map(p=>hTog("cards",p,NAMES[p],"",!hideCard(p))).join("")}${partnerEvents().map(e=>hTog("cards","event:"+e.id,e.name,"Special budget",!hideCard("event:"+e.id))).join("")}</div>`:""}
-    <div class="label" style="margin-top:12px">Buttons under "Log a purchase"</div><div class="list">${logKeys.map(k=>hTog("log",k,lname(k),k.startsWith("event:")?"Special budget":"",!hideLog(k))).join("")}</div>
+    ${simple?`<div class="label" style="margin-top:12px">Tabs at the top</div><div class="list">${partnerPools().map(p=>hTog("cards",p,NAMES[p],"",!hideCard(p))).join("")}${partnerEvents().map(e=>hTog("cards","event:"+e.id,e.name,"Special budget",!hideCard("event:"+e.id))).join("")}</div>`:""}
+    ${simple?"":`<div class="label" style="margin-top:12px">Buttons under "Log a purchase"</div><div class="list">${logKeys.map(k=>hTog("log",k,lname(k),k.startsWith("event:")?"Special budget":"",!hideLog(k))).join("")}</div>`}
   </details>`;
 }
 function seesP(k){return !(S.settings?.partnerHide||[]).includes(k)}
@@ -1577,7 +1589,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202609301801";
+const BUILD="202609301827";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
