@@ -80,6 +80,7 @@ input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid 
 .seg button{flex:1;font:600 14px var(--body);padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink);cursor:pointer}
 .seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 .camb{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:var(--bg);color:var(--ink);cursor:pointer;flex:none}
+.linkrows{display:flex;flex-direction:column;margin-top:10px}.linkrow{display:grid;grid-template-columns:minmax(90px,38%) 1fr;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}.linkrow span{font-weight:600}.linkrow select{width:100%;min-width:0}
 .gtabs{flex-wrap:wrap;gap:8px;margin-bottom:12px}.gtabs button{flex:1 1 30%;font:700 16px var(--body);padding:14px 10px;border-radius:14px;background:var(--surface)}
 .list{display:flex;flex-direction:column}
 .item{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
@@ -776,8 +777,8 @@ function cardLinkCard(){
   const sel=(k,v)=>`<select data-link="${esc(k)}"><option value="">Not linked</option>${accts.map(a=>`<option value="${esc(a.k)}" ${a.k===v?"selected":""}>${esc(a.name)}</option>`).join("")}</select>`;
   return `<div class="card"><h2>Spending money accounts</h2>
     <div class="small muted">Link each card to the bank account it spends from. Purchases then come out of that balance automatically, and refills move over on their own. Leave a card "Not linked" to track it yourself.</div>
-    <div class="list" style="margin-top:8px">${POOLS.map(p=>`<div class="item"><div class="grow">${esc(NAMES[p])}</div>${sel(p,m[p]||"")}</div>`).join("")}
-      <div class="item"><div class="grow">Special budgets</div>${sel("events",m.events||"")}</div></div>
+    <div class="linkrows">${POOLS.map(p=>`<label class="linkrow"><span>${esc(NAMES[p])}</span>${sel(p,m[p]||"")}</label>`).join("")}
+      <label class="linkrow"><span>Special budgets</span>${sel("events",m.events||"")}</label></div>
     <label class="f" style="margin-top:10px">Refill top-ups come from${`<select data-link="__src"><option value="">Nowhere (don't move money)</option>${accts.map(a=>`<option value="${esc(a.k)}" ${a.k===(P.refillFrom||"")?"selected":""}>${esc(a.name)}</option>`).join("")}</select>`}</label>
     <div class="small muted">Cards linked to this same account don't need a transfer. Their purchases already come out of it.</div>
     <label class="f" style="margin-top:10px">Splurge money is kept in<select data-link="__spl"><option value="">Same as refills${P.refillFrom?` (${esc(acctName(P.refillFrom))})`:""}</option>${accts.map(a=>`<option value="${esc(a.k)}" ${a.k===(P.splurgeAcct||"")?"selected":""}>${esc(a.name)}</option>`).join("")}</select></label>
@@ -1649,7 +1650,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202609301857";
+const BUILD="202609301900";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
