@@ -363,9 +363,9 @@ function txList(list,grace,noEmpty){
 }
 
 function aspenView(){
-  const tabs=[["week","Home"],["special","Special"],["move","Move"],["vault","Vault"],["plan","Plan"],["setup","Setup"]];
+  const tabs=[["week","Home"],["special","Special"],["move","Move"],["bills","Bills"],["vault","Vault"],["plan","Plan"],["setup","Setup"]];
   let body="";
-  if(S.tab==="move")body=moveTab();else if(S.tab==="special")body=specialTab();else if(S.tab==="plan")body=planTab();else if(S.tab==="vault")body=vaultTab();else if(S.tab==="setup")body=setupTab();else body=weekTab();
+  if(S.tab==="move")body=moveTab();else if(S.tab==="special")body=specialTab();else if(S.tab==="plan")body=planTab();else if(S.tab==="vault")body=vaultTab();else if(S.tab==="bills")body=billsTab();else if(S.tab==="setup")body=setupTab();else body=weekTab();
   const c=compute();
   return `<header><div><div class="label">${esc(weekLine(c))}</div><h1 class="brand"><img src="icon.svg" alt="" class="logo">${esc(S.settings?.title||"Family Budget")}</h1></div></header>
   <nav class="tabs" role="tablist">${tabs.map(([k,l])=>`<button role="tab" data-act="tab" data-t="${k}" aria-selected="${S.tab===k}">${l}</button>`).join("")}</nav>
@@ -428,7 +428,7 @@ function onboardSteps(){
   const P=S.plan||{},ob=P.onboard||{};
   const push=typeof Notification!=="undefined"&&Notification.permission==="granted";
   return [
-    ["bills","Add your bills","Plan tab → Edit bills. Put in each bill, its amount and due day. They'll autopay on the due date.",(P.bills||[]).length>0,"plan"],
+    ["bills","Add your bills","Bills tab → Add a bill. Say if it varies, if it autopays, and when it's due.",(P.bills||[]).length>0,"bills"],
     ["balances","Enter your bank balances","Vault tab → Accounts. Type what's in each account today.",(+P.accounts?.usaa||0)+(+P.accounts?.chase||0)>0,"vault"],
     ["buckets","Set what you're saving for","Vault tab → What we're saving for. Rename or add buckets.",!!ob.buckets,"vault"],
     ["partner",`Invite ${NAMES.grace}`,`Setup tab shows your join code. ${NAMES.grace} makes an account and picks "Join your partner".`,!!ob.partner,"setup"],
@@ -479,14 +479,26 @@ document.addEventListener("submit",async e=>{
 
 /* ---------- manual bills: ask if they were paid ---------- */
 function manualDue(){
-  if(!S.plan)return [];const today=dn(todayS()),sn=S.plan.snooze||{};
-  return billRows().filter(r=>(r.b.auto===false||isVar(r.b))&&!r.paid&&r.due!==null&&r.due<=today&&r.due>=today-7&&sn[r.key]!==todayS());
+  if(!S.plan)return [];const today=dn(todayS()),sn=S.plan.snooze||{},me=monthEndWindow(),out=[];
+  for(const r of billRows()){
+    if(sn[r.key]===todayS())continue;
+    const va=isVar(r.b),ap=autopayOn(r.b),hasAmt=S.plan.varAmt?.[r.key]!=null;
+    if(!r.paid&&!ap&&(r.due===null?me:(r.due<=today&&(r.due>=today-7||me)))){out.push({...r,ask:"paid"});continue}
+    if(va&&r.paid&&!hasAmt&&me)out.push({...r,ask:"amount"});
+  }
+  return out;
 }
 function dueTodayCard(){
   const rows=manualDue();if(!rows.length)return "";const today=dn(todayS());
-  return `<div class="card" id="bills" style="border-color:var(--warn)"><h2>Did you pay ${rows.length>1?"these":"this"}?</h2>
-    <div class="small muted">These bills don't autopay. Mark them once they're paid.</div>
-    <div class="list">${rows.map(r=>billRowHtml(r,today)+(S.payOpen===r.key||S.varOpen===r.key?"":`<div style="text-align:right;margin-top:-6px"><button class="x" data-act="snooze" data-key="${esc(r.key)}">Not yet, ask tomorrow</button></div>`)).join("")}</div>
+  return `<div class="card" id="bills" style="border-color:var(--warn)"><h2>${rows.length>1?"Bills to check":rows[0].ask==="amount"?`What was ${esc(rows[0].b.name)} this month?`:`Did you pay ${esc(rows[0].b.name)}?`}</h2>
+    <div class="list">${rows.map(r=>{
+      if(S.payOpen===r.key||S.varOpen===r.key)return billRowHtml(r,today);
+      const va=isVar(r.b),when=r.due===null?"This month":r.due===today?"Due today":r.due<today?`Was due ${short(r.due)}`:`Due ${short(r.due)}`;
+      if(r.ask==="amount")return `<div class="item"><div class="grow"><div>${esc(r.b.name)}</div><div class="small muted">Paid · enter the real amount (estimate was ${m2(billAmt(r.b,r.key))})</div></div>
+        <button class="btn sm" data-act="varopen" data-key="${esc(r.key)}">Enter amount</button></div>`;
+      return `<div class="item" style="flex-wrap:wrap"><div class="grow"><div>${esc(r.b.name)} <span class="num">${va?"~":""}${m2(billAmt(r.b,r.key))}</span></div><div class="small muted">${when}</div></div>
+        <div style="display:flex;gap:6px"><button class="btn sm" data-act="${va?"payopen":"quickpaid"}" data-key="${esc(r.key)}">Yes, paid</button>
+        <button class="btn sm ghost" data-act="snooze" data-key="${esc(r.key)}">Not yet</button></div></div>`}).join("")}</div>
   </div>`;
 }
 
@@ -596,26 +608,6 @@ function billsCard(){
     <div class="muted small" style="margin-top:4px">${m0(paidAmt)} of ${m0(total)} paid this month</div>
     ${needAmt.length?`<div class="chip warn" style="margin-top:8px">Enter this month's amount: ${needAmt.map(r=>esc(r.b.name)).join(", ")}</div>`:""}
     <div class="list" style="margin-top:6px">${rows.map(r=>billRowHtml(r,today)).join("")}</div>
-    <details style="margin-top:8px"><summary class="small"><b>Edit bills</b></summary>
-      <div class="tbl" style="margin-top:8px">${(P.bills||[]).map((b,i)=>`<div class="bill">
-        <div style="min-width:0"><div>${esc(b.name)}</div><div class="meta">${dayOf(b)?"Due the "+ordinal(dayOf(b)):"No due date"}${b.phase!=="both"?` · ${b.phase==="pre"?"until closing":"after closing"}`:""}</div></div>
-        <input data-plan="bills.${i}.amt" inputmode="decimal" value="${esc(b.amt)}" aria-label="${esc(b.name)} ${b.variable?"estimate":"amount"}" title="${b.variable?"Estimate used until you enter the real amount":"Amount"}">
-        <button class="x" data-act="delbill" data-i="${i}" aria-label="Remove ${esc(b.name)}">✕</button>
-        <div class="meta" style="grid-column:1/-1;display:flex;gap:14px;flex-wrap:wrap;align-items:center">
-          <label class="check small">Due day <input data-billday="${i}" inputmode="numeric" value="${dayOf(b)??""}" placeholder="1–31" aria-label="${esc(b.name)} due day" style="width:58px;padding:4px 6px;font-size:14px"></label>
-          <label class="check small"><input type="checkbox" data-act="billvar" data-i="${i}" ${b.variable?"checked":""}> Changes every month</label>
-          ${b.variable?"":`<label class="check small"><input type="checkbox" data-act="billauto" data-i="${i}" ${b.auto===false?"":"checked"}> Autopay on due date</label>`}
-          <label class="check small">From <select data-act="billfrom" data-i="${i}" style="width:auto;padding:4px 6px;font-size:13px"><option value="bills" ${b.from!=="savings"?"selected":""}>${esc(L().bills)}</option><option value="savings" ${b.from==="savings"?"selected":""}>${esc(L().save)}</option></select></label></div></div>`).join("")}</div>
-      <form class="form" id="billf" style="margin-top:10px">
-        <div class="row"><label class="f">New bill<input id="bf-name" placeholder="Electric"></label>
-          <label class="f">Monthly<input id="bf-amt" inputmode="decimal" placeholder="0.00"></label></div>
-        <div class="row"><label class="f">Due day (1–31)<input id="bf-day" inputmode="numeric" placeholder="15"></label>
-          <label class="f">When<select id="bf-phase"><option value="both">Always</option><option value="pre">Until closing</option><option value="post">After closing</option></select></label></div>
-        <button class="btn ghost" type="submit">Add bill</button>
-      </form>
-      <div class="kv small"><span class="muted">Monthly total before closing</span><b>${m2(billTotal("pre"))}</b></div>
-      <div class="kv small"><span class="muted">Monthly total after closing</span><b>${m2(billTotal("post"))}</b></div>
-    </details>
   </div>`;
 }
 
@@ -623,6 +615,9 @@ function billsCard(){
 /* ---------- bills: mark paid with amount + date ---------- */
 function billAmt(b,key){const v=S.plan?.varAmt?.[key];return v!=null?+v:(+b.amt||0)}
 function isVar(b){return !!b.variable}
+function autopayOn(b){return !!dayOf(b)&&(isVar(b)?b.auto===true:b.auto!==false)}
+function lastDayThisMonth(){const t=new Date();return new Date(t.getFullYear(),t.getMonth()+1,0).getDate()}
+function monthEndWindow(){return new Date().getDate()>=lastDayThisMonth()-2}
 function paidInfo(key){return (S.plan?.paidLog||[]).find(x=>x.key===key)}
 function billRowHtml(r,today){
   const info=paidInfo(r.key);
@@ -813,9 +808,9 @@ function runAutopay(){
   if(!P.autoStart){P.autoStart=todayS();savePlan()}
   const start=dn(P.autoStart),skip=new Set(P.skipAuto||[]);let changed=0;const paid=new Set(P.paid||[]);
   for(const r of billRows()){
-    if(r.b.auto===false||isVar(r.b)||r.due===null||r.paid||r.due>today||skip.has(r.key)||paid.has(r.key))continue;
+    if(!autopayOn(r.b)||r.paid||r.due>today||skip.has(r.key)||paid.has(r.key))continue;
     if(r.due<Math.max(start,r.b.added?dn(r.b.added):start))continue;
-    const amt=+r.b.amt||0;paid.add(r.key);
+    const amt=billAmt(r.b,r.key);paid.add(r.key);
     P.paidLog=(P.paidLog||[]).filter(x=>x.key!==r.key).concat([{key:r.key,amount:amt,date:ds(r.due),auto:true,acct:billAcct(r.b)}]);
     acctAdjust(billAcct(r.b),-amt);changed++;
   }
@@ -899,6 +894,50 @@ function budgetsDetail(){
   </div>`;
 }
 
+/* ---------- Bills tab: this month + manage bills ---------- */
+function billSummary(b){const d=dayOf(b);return [autopayOn(b)?"Autopay":"You pay it",d?`due the ${ordinal(d)}`:"no set due date",`from ${billAcct(b)==="usaa"?L().save:L().bills}`,b.phase==="pre"?"until closing":b.phase==="post"?"after closing":""].filter(Boolean).join(" · ")}
+function billHint(va,ap,hasDay){
+  if(ap&&!hasDay)return "Autopay needs a due date.";
+  if(ap)return va?"Marks itself paid on the due date using your estimate. Enter the real amount before the month ends; you'll get a reminder 2 days before.":"Marks itself paid on the due date and takes it out of the account.";
+  if(hasDay)return `At 5 PM on the due date you'll get asked if it's paid.${va?" Tap yes, then enter the amount.":" Tap yes and it's marked paid."}`;
+  return `Two days before the month ends you'll get asked if it's paid.${va?" Tap yes, then enter the date and amount.":" Tap yes and it's marked paid."}`;
+}
+function billForm(b,i){
+  const va=!!b.variable,ap=i==="new"?false:autopayOn(b),lb=L();
+  return `<form class="goal billform" id="billform" data-i="${i}">
+    <b>${i==="new"?"New bill":"Edit "+esc(b.name)}</b>
+    <label class="f">Bill name<input id="bl-name" value="${esc(b.name||"")}" placeholder="Electric" autocomplete="off"></label>
+    <div class="f">Does the amount change month to month?<div class="seg" data-grp="var"><button type="button" data-act="blseg" data-v="0" aria-pressed="${!va}">Same every month</button><button type="button" data-act="blseg" data-v="1" aria-pressed="${va}">It varies</button></div></div>
+    <label class="f"><span id="bl-amt-label">${va?"Usual amount (a guess is fine)":"Amount"}</span><input id="bl-amt" inputmode="decimal" value="${b.amt??""}" placeholder="0.00"></label>
+    <div class="f">Autopay?<div class="seg" data-grp="auto"><button type="button" data-act="blseg" data-v="1" aria-pressed="${ap}">Yes, it autopays</button><button type="button" data-act="blseg" data-v="0" aria-pressed="${!ap}">No, I pay it</button></div></div>
+    <label class="f">Due day (1–31)<input id="bl-day" inputmode="numeric" value="${dayOf(b)??""}" placeholder="Leave blank if there's no set date"></label>
+    <div class="row"><label class="f">Paid from<select id="bl-from"><option value="bills" ${b.from!=="savings"?"selected":""}>${esc(lb.bills)}</option><option value="savings" ${b.from==="savings"?"selected":""}>${esc(lb.save)}</option></select></label>
+      <label class="f">When<select id="bl-phase"><option value="both" ${!b.phase||b.phase==="both"?"selected":""}>Always</option><option value="pre" ${b.phase==="pre"?"selected":""}>Until closing</option><option value="post" ${b.phase==="post"?"selected":""}>After closing</option></select></label></div>
+    <div class="small muted" id="bl-hint">${billHint(va,ap,!!dayOf(b))}</div>
+    <div class="row"><button class="btn" type="submit">Save</button><button class="btn ghost" type="button" data-act="billcancel">Cancel</button></div>
+    ${i!=="new"?`<button class="x" type="button" data-act="delbill" data-i="${i}" style="color:var(--bad);align-self:flex-start">Delete this bill</button>`:""}
+  </form>`;
+}
+function segVal(grp){return document.querySelector(`#billform [data-grp="${grp}"] [aria-pressed="true"]`)?.dataset.v==="1"}
+function refreshBillHint(){const va=segVal("var"),ap=segVal("auto"),d=parseInt(val("bl-day"),10);
+  const l=document.getElementById("bl-amt-label");if(l)l.textContent=va?"Usual amount (a guess is fine)":"Amount";
+  const hn=document.getElementById("bl-hint");if(hn)hn.textContent=billHint(va,ap,d>=1&&d<=31)}
+function manageBills(){
+  const P=S.plan,list=(P.bills||[]).map((b,i)=>({b,i}));
+  return `<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><h2 style="margin:0">Your bills</h2>${S.billEdit==null?`<button class="btn sm" data-act="billnew">Add a bill</button>`:""}</div>
+    <div class="small muted" style="margin:4px 0 6px">Tap a bill to change it.</div>
+    ${S.billEdit==="new"?billForm({},"new"):""}
+    <div class="list">${list.map(({b,i})=>`<div class="bucket">${S.billEdit===i?billForm(b,i):`<button class="bk-head" data-act="billedit" data-i="${i}"><span class="bk-name">${esc(b.name)}</span><span class="num bk-amt">${isVar(b)?"~":""}${m2(b.amt)}</span><span class="bk-note small muted">${isVar(b)?"Varies · ":""}${esc(billSummary(b))}</span></button>`}</div>`).join("")}</div>
+    <div class="kv small" style="margin-top:8px"><span class="muted">Monthly total before closing</span><b>${m2(billTotal("pre"))}</b></div>
+    <div class="kv small"><span class="muted">Monthly total after closing</span><b>${m2(billTotal("post"))}</b></div>
+  </div>`;
+}
+function billsTab(){if(!S.plan)return planTab();return `<section>${billsCard()}${manageBills()}</section>`}
+function renameBillKeys(o,n){const P=S.plan,fx=k=>k.startsWith(o+"|")?n+k.slice(o.length):k;
+  P.paid=(P.paid||[]).map(fx);P.skipAuto=(P.skipAuto||[]).map(fx);(P.paidLog||[]).forEach(x=>x.key=fx(x.key));
+  for(const obj of [P.varAmt,P.snooze])if(obj)for(const k of Object.keys(obj)){const nk=fx(k);if(nk!==k){obj[nk]=obj[k];delete obj[k]}}}
+document.addEventListener("input",e=>{if(e.target.id==="bl-day")refreshBillHint()});
+
 function planTab(){
   const P=S.plan;
   if(!P)return S.planMissing?`<div class="empty">No plan yet. It holds your bills, account balances, debts and savings goals, and only you can see it.<div style="margin-top:10px"><button class="btn" data-act="blankplan">Start my plan</button></div></div>`:`<div class="empty">Loading your plan…</div>`;
@@ -915,7 +954,6 @@ function planTab(){
   const goals=P.goals||[];
   return `<section>
     ${incomeCard()}
-    ${billsCard()}
     ${budgetsDetail()}
 
     ${payPlanner(P,c,perCheck,spend,gNet,post)}
@@ -1051,7 +1089,7 @@ document.addEventListener("click",async e=>{
   if(a==="deltx"||a==="delmv"||a==="delbill"||a==="deldebt"){if(!arm(b))return;
     if(a==="deltx")db.doc("txns/"+b.dataset.id).delete().then(()=>toast("Deleted")).catch(fail);
     if(a==="delmv")db.doc("moves/"+b.dataset.id).delete().then(()=>toast("Move undone")).catch(fail);
-    if(a==="delbill"){S.plan.bills.splice(+b.dataset.i,1);render();savePlan()}
+    if(a==="delbill"){S.plan.bills.splice(+b.dataset.i,1);S.billEdit=null;render();savePlan();toast("Bill deleted")}
     if(a==="deldebt"){S.plan.debts.splice(+b.dataset.i,1);render();savePlan()}
     return}
   if(a==="payopen"){S.payOpen=b.dataset.key;render();document.getElementById("pf-amt")?.focus();return}
@@ -1061,6 +1099,13 @@ document.addEventListener("click",async e=>{
     S.plan.paid=(S.plan.paid||[]).filter(x=>x!==k);S.plan.paidLog=(S.plan.paidLog||[]).filter(x=>x.key!==k);
     S.plan.skipAuto=[...new Set([...(S.plan.skipAuto||[]),k])];render();savePlan();return}
   if(a==="billvar"){const bl=S.plan.bills[+b.dataset.i];bl.variable=b.checked;render();savePlan();toast(b.checked?`${bl.name}: enter the amount each month`:`${bl.name}: same amount every month`);return}
+  if(a==="billnew"){S.billEdit="new";render();document.getElementById("bl-name")?.focus();return}
+  if(a==="billedit"){S.billEdit=+b.dataset.i;render();return}
+  if(a==="billcancel"){S.billEdit=null;render();return}
+  if(a==="blseg"){const g=b.closest("[data-grp]");g.querySelectorAll("button").forEach(x=>x.setAttribute("aria-pressed",String(x===b)));refreshBillHint();return}
+  if(a==="quickpaid"){const k=b.dataset.key,bill=(S.plan.bills||[]).find(x=>k.startsWith(x.name+"|"));if(!bill)return;const amt=+bill.amt||0,acct=billAcct(bill);
+    acctAdjust(acct,-amt);S.plan.paid=[...new Set([...(S.plan.paid||[]),k])];S.plan.paidLog=(S.plan.paidLog||[]).filter(x=>x.key!==k).concat([{key:k,amount:amt,date:todayS(),acct}]);
+    render();savePlan();toast(`${bill.name} marked paid`);return}
   if(a==="snooze"){S.plan.snooze={...(S.plan.snooze||{})};for(const k of Object.keys(S.plan.snooze))if(S.plan.snooze[k]!==todayS())delete S.plan.snooze[k];S.plan.snooze[b.dataset.key]=todayS();render();savePlan();return}
   if(a==="varopen"){S.varOpen=b.dataset.key;render();document.getElementById("vf-amt")?.focus();return}
   if(a==="varcancel"){S.varOpen=null;render();return}
@@ -1152,11 +1197,13 @@ document.addEventListener("submit",async e=>{
     const custom=(S.settings.custom||[]).concat([{id,name,shared:!!document.getElementById("cf-shared")?.checked}]);
     try{await saveSettings({custom,history:(S.settings.history||[]).filter(x=>x.from!==from).concat([entry])});toast(`${name} added`);f.reset()}catch(err){fail(err)}}
   if(f.id==="varf"){const k=f.dataset.key,v=num(val("vf-amt"));if(!(v>=0)){toast("Enter the amount");return}
+    const info=(S.plan.paidLog||[]).find(x=>x.key===k);if(info&&info.acct){acctAdjust(info.acct,-(v-(+info.amount||0)));info.amount=v}
     S.plan.varAmt={...(S.plan.varAmt||{}),[k]:v};const cutoff=ds(dn(todayS())-100).slice(0,7);
     for(const x of Object.keys(S.plan.varAmt))if((x.split("|")[1]||"")<cutoff)delete S.plan.varAmt[x];
     S.varOpen=null;render();savePlan();toast("Saved")}
   if(f.id==="payf"){const k=f.dataset.key,amt=num(val("pf-amt"));if(!(amt>=0)){toast("Enter the amount paid");return}
     const bill=(S.plan.bills||[]).find(x=>k.startsWith(x.name+"|")),acct=bill?billAcct(bill):"chase";acctAdjust(acct,-amt);
+    if(bill&&isVar(bill))S.plan.varAmt={...(S.plan.varAmt||{}),[k]:amt};
     S.plan.paid=[...new Set([...(S.plan.paid||[]),k])];S.plan.paidLog=(S.plan.paidLog||[]).filter(x=>x.key!==k).concat([{key:k,amount:amt,date:val("pf-date")||todayS(),acct}]);
     const cutoff=ds(dn(todayS())-100).slice(0,7);S.plan.paid=S.plan.paid.filter(x=>(x.split("|")[1]||"")>=cutoff);S.plan.paidLog=S.plan.paidLog.filter(x=>(x.key.split("|")[1]||"")>=cutoff);
     S.payOpen=null;render();savePlan();toast("Marked paid")}
@@ -1180,6 +1227,17 @@ document.addEventListener("submit",async e=>{
     if(!name||!(amt>=0)){toast("Add a name and a budget");return}
     try{await db.collection("events").add({name,budget:amt,active:true,created:Date.now()});toast(`${name} added`);f.reset()}catch(err){fail(err)}
   }
+  if(f.id==="billform"){
+    const i=f.dataset.i,name=val("bl-name").trim().slice(0,60),amt=num(val("bl-amt")),va=segVal("var"),ap=segVal("auto"),ds_=val("bl-day").trim(),d=parseInt(ds_,10);
+    if(!name){toast("Give the bill a name");return}
+    if(!va&&!isFinite(amt)){toast("Enter the amount");return}
+    if(ds_&&!(d>=1&&d<=31)){toast("Due day has to be 1 to 31");return}
+    if(ap&&!ds_){toast("Autopay needs a due date");return}
+    if(S.plan.bills.some((x,j)=>x.name.toLowerCase()===name.toLowerCase()&&String(j)!==String(i))){toast("You already have a bill with that name");return}
+    const fields={name,amt:isFinite(amt)?amt:0,variable:va,auto:ap,day:ds_?String(d):"",from:val("bl-from"),acct:val("bl-from")==="savings"?L().save:L().bills,phase:val("bl-phase")};
+    if(i==="new")S.plan.bills.push({...fields,added:todayS()});
+    else{const b=S.plan.bills[+i];if(b.name!==name)renameBillKeys(b.name,name);Object.assign(b,fields)}
+    S.billEdit=null;render();savePlan();toast(i==="new"?`Added ${name}`:"Saved")}
   if(f.id==="billf"){
     const name=val("bf-name").trim(),amt=num(val("bf-amt"));
     if(!name||!isFinite(amt)){toast("Add a name and amount");return}
@@ -1355,7 +1413,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202609300836";
+const BUILD="202609300848";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);

@@ -84,22 +84,29 @@ function summarize(settings: any, txns: any[], moves: any[], events: any[], toda
   return { out, names, customs, ev, resetTomorrow: next === t + 1, frac: Math.min(1, Math.max(0, (t - cw + 1) / Math.max(1, next - cw))) };
 }
 
-// 5 PM check: bills that don't autopay and are due today (or recently, still unpaid).
+// 5 PM check. Bills you pay yourself: asked on the due date, or 2 days before month end if there is no due date.
+// Bills whose amount varies: reminded 2 days before month end to enter the amount.
+// deno-lint-ignore no-explicit-any
+function billDay(b: any) { const d = parseInt(String(b.day || "").replace(/\D/g, ""), 10); return d >= 1 && d <= 31 ? d : null; }
+// deno-lint-ignore no-explicit-any
+function autopayOn(b: any) { return billDay(b) !== null && (b.variable ? b.auto === true : b.auto !== false); }
 // deno-lint-ignore no-explicit-any
 function manualDue(plan: any, today: string) {
-  const t = dn(today), [Y, M] = today.split("-").map(Number), paid = new Set(plan.paid || []), sn = plan.snooze || {};
-  const phase = plan.postClosing ? "post" : "pre";
+  const t = dn(today), [Y, M, D] = today.split("-").map(Number), paid = new Set(plan.paid || []), sn = plan.snooze || {}, va = plan.varAmt || {};
+  const last = new Date(Date.UTC(Y, M, 0)).getUTCDate(), me = D >= last - 2, phase = plan.postClosing ? "post" : "pre";
   // deno-lint-ignore no-explicit-any
   const out: any[] = [];
   for (const b of plan.bills || []) {
-    if (!(b.auto === false || b.variable)) continue;
     if (!(b.phase === "both" || b.phase === phase || !b.phase)) continue;
-    const d = parseInt(String(b.day || "").replace(/\D/g, ""), 10); if (!(d >= 1 && d <= 31)) continue;
+    const d = billDay(b), ap = autopayOn(b);
     for (const off of [0, -1]) {
-      const y = M + off < 1 ? Y - 1 : Y, m = ((M - 1 + off + 12) % 12);
-      const last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate(), due = Math.round(Date.UTC(y, m, Math.min(d, last)) / DAY);
-      const key = `${b.name}|${y}-${String(m + 1).padStart(2, "0")}`;
-      if (due <= t && due >= t - 7 && !paid.has(key) && sn[key] !== today) { const v = plan.varAmt?.[key]; out.push({ name: b.name, due, amt: v != null ? +v : +b.amt || 0, est: b.variable && v == null }); }
+      const y = M + off < 1 ? Y - 1 : Y, m = (M - 1 + off + 12) % 12, key = `${b.name}|${y}-${String(m + 1).padStart(2, "0")}`;
+      if (sn[key] === today) continue;
+      const due = d === null ? null : Math.round(Date.UTC(y, m, Math.min(d, new Date(Date.UTC(y, m + 1, 0)).getUTCDate())) / DAY);
+      const est = va[key] != null ? +va[key] : +b.amt || 0;
+      if (off === 0 && !paid.has(key) && !ap && (due === null ? me : (due <= t && (due >= t - 7 || me)))) out.push({ name: b.name, due, amt: est, ask: "paid", vary: !!b.variable });
+      else if (off === -1 && d !== null && !paid.has(key) && !ap && due !== null && due >= t - 7) out.push({ name: b.name, due, amt: est, ask: "paid", vary: !!b.variable });
+      else if (off === 0 && b.variable && paid.has(key) && va[key] == null && me) out.push({ name: b.name, due, amt: est, ask: "amount", vary: true });
     }
   }
   return out;
@@ -129,8 +136,9 @@ async function billCheck(now: { date: string }, force: boolean, only: string | n
     const due = manualDue(pl.data, now.date);
     if (!due.length) continue;
     const t = dn(now.date);
-    const title = due.length === 1 ? `Did you pay ${due[0].name}?` : `Did you pay these ${due.length} bills?`;
-    const body = due.map((x) => `${x.name}: ${x.est ? "about " : ""}${money(x.amt)}${x.due < t ? " (was due " + new Date(x.due * DAY).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) + ")" : " due today"}`).join("\n") + "\nTap to mark it paid.";
+    const title = due.length > 1 ? `${due.length} bills to check` : due[0].ask === "amount" ? `What was ${due[0].name} this month?` : `Did you pay ${due[0].name}?`;
+    const fmt = (x: number) => new Date(x * DAY).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+    const body = due.map((x) => x.ask === "amount" ? `${x.name}: enter this month's amount` : `${x.name}: ${x.vary ? "about " : ""}${money(x.amt)}${x.due === null ? " this month" : x.due < t ? " (was due " + fmt(x.due) + ")" : " due today"}`).join("\n") + "\nTap to update it in the app.";
     try {
       await webpush.sendNotification({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth_key } }, JSON.stringify({ notification: { title, body, tag: `bills-${now.date}`, navigate: APP_URL + "#bills" } }), { TTL: 6 * 3600 });
       sent++;
