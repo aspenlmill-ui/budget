@@ -250,25 +250,28 @@ function render(){
   if(!S.settingsLoaded){return}
   if(!S.settings){app.innerHTML=S.owner?firstRun():`<header><div><div class="label">Family Budget</div><h1>Almost ready</h1></div></header><div class="empty">This budget hasn't been set up yet. Once the owner sets it up, your weekly number shows here.</div>`;return}
   const keep={a:document.getElementById("lf-amt")?.value,n:document.getElementById("lf-note")?.value};
-  app.innerHTML=S.view==="aspen"?aspenView():graceView();
+  app.innerHTML=S.view==="aspen"?(S.prefs?.simple?simpleView(S.owner?"aspen":"grace",true):aspenView()):graceView();
   if(keep.a&&document.getElementById("lf-amt"))document.getElementById("lf-amt").value=keep.a;
   if(keep.n&&document.getElementById("lf-note"))document.getElementById("lf-note").value=keep.n;
 }
 
 function weekLine(c){const n=nextReset();return `${PER().label} · since ${short(c.cw)} · refills ${pretty(n)}`}
 
-function graceView(){
-  const c=compute(),pp=partnerPools().filter(p=>!hideCard(p)),evs=partnerEvents().filter(e=>!hideCard("event:"+e.id));
-  const tabs=[["grace","My Money"],...pp.map(p=>[p,NAMES[p]]),...evs.map(e=>["event:"+e.id,e.name])];
-  const tab=tabs.some(t=>t[0]===S.gTab)?S.gTab:"grace",isEv=tab.startsWith("event:");
+function graceView(){return simpleView("grace",false)}
+function simpleView(me,self){
+  const c=compute(),other=me==="aspen"?"grace":"aspen";
+  const pp=(self?POOLS.filter(p=>p!==me&&p!==other):partnerPools()).filter(p=>!hideCard(p));
+  const evs=(self?activeEvents().filter(e=>!hideLog("event:"+e.id)):partnerEvents()).filter(e=>!hideCard("event:"+e.id));
+  const tabs=[[me,"My Money"],...pp.map(p=>[p,NAMES[p]]),...evs.map(e=>["event:"+e.id,e.name])];
+  const tab=tabs.some(t=>t[0]===S.gTab)?S.gTab:me,isEv=tab.startsWith("event:");
   const tname=tabs.find(t=>t[0]===tab)[1];
   let left,spent,of,sub;
   if(isEv){const st=evStats(S.events.find(e=>"event:"+e.id===tab));left=st.left;spent=st.spent;of=st.budget;sub="Special budget"}
   else{const x=c[tab];left=x.left;spent=x.spent;of=x.alloc;sub=`${cap(PER().this)} · refills ${pretty(nextReset())}`}
   const hist=S.txns.filter(t=>t.pool===tab&&t.from!=="cushion").sort((a,b)=>b.ts-a.ts).slice(0,40);
-  const who=tab==="grace"?NAMES.grace:tname;
+  const who=tab===me?NAMES[me]:tname;
   return `
-  ${S.owner?`<header><div><div class="label">Preview</div><h1 class="brand"><img src="icon.svg" alt="" class="logo">${esc(NAMES.grace)}'s screen</h1></div><button class="btn ghost sm" data-act="view" data-v="aspen">Back to my view</button></header>`:""}
+  ${self?`<div style="display:flex;justify-content:flex-end;margin-bottom:6px"><button class="btn ghost sm" data-act="simpleview" data-v="0">Full app</button></div>`:S.owner?`<header><div><div class="label">Preview</div><h1 class="brand"><img src="icon.svg" alt="" class="logo">${esc(NAMES.grace)}'s screen</h1></div><button class="btn ghost sm" data-act="view" data-v="aspen">Back to my view</button></header>`:""}
   <nav class="seg gtabs" role="tablist" style="margin-top:4px">${tabs.map(([k,l])=>`<button type="button" role="tab" data-act="gtab" data-k="${esc(k)}" aria-pressed="${k===tab}">${esc(l)}</button>`).join("")}</nav>
   <div class="card hero ${left<0?"over":""}">
     <div class="label">${esc(who)} money left</div>
@@ -276,25 +279,25 @@ function graceView(){
     <div class="muted">${m2(spent)} spent of ${m2(of)}</div>
     <div class="muted small">${esc(sub)}</div>
     ${left<0?`<div class="chip bad" style="margin-top:6px">${m2(-left)} over. Let ${esc(NAMES.aspen)} know so money can be moved.</div>`:""}
-    ${tab==="grace"&&c.grace.cushion>0?`<div class="chip" style="margin-top:6px">Saved from past ${esc(PER().noun)}s: ${m2(c.grace.cushion)}</div>`:""}
+    ${tab===me&&c[me].cushion>0?`<div class="chip" style="margin-top:6px">Saved from past ${esc(PER().noun)}s: ${m2(c[me].cushion)}</div>`:""}
   </div>
   <form class="card form" id="gpf" data-pool="${esc(tab)}">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><h2 style="margin:0">Add ${tab==="grace"?"personal":esc(tname.toLowerCase())} purchase</h2>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><h2 style="margin:0">Add ${tab===me?"personal":esc(tname.toLowerCase())} purchase</h2>
       <label for="lf-cam" class="camb" title="Snap a receipt" aria-label="Snap a receipt"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></label>
       <input type="file" id="lf-cam" accept="image/*" capture="environment" hidden></div>
     ${receiptQueue()}
     <label class="f">Amount<input id="gp-amt" inputmode="decimal" autocomplete="off"></label>
     <label class="f">What was it?<input id="gp-note" placeholder="${tab==="household"?"Groceries, dinner out, dog food...":"Gas, dinner, coffee..."}" autocomplete="off"></label>
     ${tab==="household"?`<label class="f">Category<select id="gp-cat">${HCATS.map(x=>`<option>${x}</option>`).join("")}</select></label>`:""}
-    <button class="btn" type="submit">Subtract from ${esc(tab==="grace"?"My Money":tname)}</button>
+    <button class="btn" type="submit">Subtract from ${esc(tab===me?"My Money":tname)}</button>
   </form>
-  <div class="card"><h2>${tab==="grace"?"My purchase history":esc(tname)+" history"}</h2>
+  <div class="card"><h2>${tab===me?"My purchase history":esc(tname)+" history"}</h2>
     ${hist.length?`<div class="list">${hist.map(t=>`<div class="item"><div class="grow"><div><b>${esc(t.note||t.cat||"Purchase")}</b></div>
       <div class="muted small">${esc(new Date(t.ts||Date.parse(t.date+"T12:00:00")).toLocaleString("en-US",{month:"numeric",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit"}))}</div></div>
       <b class="num">-${m2(t.amount)}</b>${t.mine?`<button class="x" data-act="deltx" data-id="${esc(t.id)}" aria-label="Delete">✕</button>`:""}</div>`).join("")}</div>`
       :`<div class="muted small">Nothing yet.</div>`}
   </div>
-  ${S.owner?"":homeCustomCard(true)}
+  ${self||S.owner?"":homeCustomCard(true)}
   ${pushButton()}
   <button class="btn ghost" data-act="signout">Sign out</button>
   ${accountCard()}`;
@@ -386,7 +389,7 @@ function aspenView(){
   let body="";
   if(S.tab==="move")body=moveTab();else if(S.tab==="special")body=specialTab();else if(S.tab==="plan")body=planTab();else if(S.tab==="vault")body=vaultTab();else if(S.tab==="bills")body=billsTab();else if(S.tab==="setup")body=setupTab();else body=weekTab();
   const c=compute();
-  return `<header><div><div class="label">${esc(weekLine(c))}</div><h1 class="brand"><img src="icon.svg" alt="" class="logo">${esc(S.settings?.title||"Family Budget")}</h1></div></header>
+  return `<header><div><div class="label">${esc(weekLine(c))}</div><h1 class="brand"><img src="icon.svg" alt="" class="logo">${esc(S.settings?.title||"Family Budget")}</h1></div><button class="btn ghost sm" data-act="simpleview" data-v="1">Simple view</button></header>
   <nav class="tabs" role="tablist">${tabs.map(([k,l])=>`<button role="tab" data-act="tab" data-t="${k}" aria-selected="${S.tab===k}">${l}</button>`).join("")}</nav>
   ${body}`;
 }
@@ -1175,6 +1178,7 @@ document.addEventListener("click",async e=>{
   if(a==="inctdel"){if(!arm(b,"Tap again to remove"))return;S.plan.incomeTypes=(S.plan.incomeTypes||[]).filter(t=>t.k!==b.dataset.k);if(S.depSrc===b.dataset.k)S.depSrc="mine";render();savePlan();return}
   if(a==="depadd"){const r=depRuleSet(S.depSrc||"mine");r.splits=[...(r.splits||[]),{to:acctList().find(x=>x.k!==r.home)?.k||"usaa",amt:0}];render();savePlan();return}
   if(a==="depdel"){const r=depRuleSet(S.depSrc||"mine");r.splits.splice(+b.dataset.i,1);render();savePlan();return}
+  if(a==="simpleview"){S.prefs=S.prefs||{};S.prefs.simple=b.dataset.v==="1";S.gTab=null;window.scrollTo(0,0);render();savePrefs();return}
   if(a==="gtab"){S.gTab=b.dataset.k;render();return}
   if(a==="pshow"){const k=b.dataset.k,on=b.dataset.v==="1";
     try{if(k.startsWith("custom:")){const id=k.slice(7);await saveSettings({custom:(S.settings.custom||[]).map(c=>c.id===id?{...c,shared:on}:c)})}
@@ -1593,7 +1597,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202609301831";
+const BUILD="202609301836";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
