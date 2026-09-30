@@ -270,7 +270,8 @@ function graceView(){
   ${logForm(pool,true)}
   <div class="card"><h2>This week</h2>${txList(mine,true)}</div>
   ${pushButton()}
-  <button class="btn ghost" data-act="signout">Sign out</button>`;
+  <button class="btn ghost" data-act="signout">Sign out</button>
+  ${accountCard()}`;
 }
 
 function pct(a,b){return b>0?Math.max(0,Math.min(100,a/b*100)):(a>0?100:0)}
@@ -844,6 +845,7 @@ function setupTab(){
       ${[["light","Light"],["dark","Dark"],["auto","Match phone"]].map(([k,l])=>`<button type="button" data-act="theme" data-v="${k}" aria-pressed="${getTheme()===k}">${l}</button>`).join("")}</div></div>
     <div class="card"><h2>This phone</h2><div class="small muted">Get what's left every night at 7 PM, and the reload amounts the night before the week resets.</div>
       <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">${pushButton()}<button class="btn ghost" data-act="signout">Sign out</button></div></div>
+    ${accountCard()}
     ${S.plan?`<form class="card" id="labelf"><h2>Account names</h2>
       <div class="row"><label class="f">Savings account<input id="lb-save" value="${esc(L().save)}"></label>
       <label class="f">Bills account<input id="lb-bills" value="${esc(L().bills)}"></label></div>
@@ -1143,6 +1145,51 @@ db={
     if(c==="events")chk(await sb.from("wb_events").insert({household_id:HID,name:d.name,budget:d.budget,active:true}));
     await LOAD[c]();render()}}}
 };
+
+
+/* ---------- account: switch household or delete ---------- */
+function accountCard(){
+  return `<details class="card"><summary><b>Account</b> <span class="small muted">· wrong budget or delete account</span></summary>
+    <form class="form" id="switchf" style="margin-top:12px">
+      <b>Join your partner's budget instead</b>
+      <div class="small muted">Started your own budget by mistake? Enter your partner's join code (it's in their Setup tab). ${S.owner?"The budget you started here gets deleted and you move into theirs.":"You'll leave this budget and move into theirs."}</div>
+      <div class="row"><label class="f">Join code<input id="sw-code" autocapitalize="characters" placeholder="8 letters and numbers"></label>
+        <label class="f">Your first name<input id="sw-me" autocomplete="given-name"></label></div>
+      <button class="btn ghost" type="submit">Switch budgets</button>
+    </form>
+    <form class="form" id="delf" style="margin-top:18px;border-top:1px solid var(--line);padding-top:14px">
+      <b style="color:var(--bad)">Delete my account</b>
+      <div class="small muted">Removes your login, your purchases and your receipt photos. ${S.owner?`If ${esc(NAMES.grace)} is still in this budget, ${esc(NAMES.grace)} needs to leave first.`:"Your partner's budget stays as it is."} This can't be undone.</div>
+      <label class="f">Type DELETE to confirm<input id="del-confirm" autocapitalize="characters" autocomplete="off"></label>
+      <button class="btn" type="submit" style="background:var(--bad);color:#fff">Delete my account</button>
+    </form>
+  </details>`;
+}
+function accountErr(err){const m=String(err?.message||err||"");
+  if(m.includes("PARTNER_STILL_IN"))return `${NAMES.grace} is still in this budget. ${NAMES.grace} needs to leave first (Setup → Account), then you can do this.`;
+  if(/Invalid/.test(m))return "That code didn't match. Check it with your partner.";
+  return "Something went wrong. Try again in a minute."}
+document.addEventListener("submit",async e=>{
+  const f=e.target;if(f.id!=="switchf"&&f.id!=="delf")return;e.preventDefault();
+  if(f.id==="switchf"){const code=val("sw-code").trim();if(!code){toast("Enter the join code");return}
+    const r=await sb.rpc("wb_switch_household",{household_code:code,my_display_name:val("sw-me").trim()||null});
+    if(r.error){toast(accountErr(r.error));return}
+    toast("Switched. You're in your partner's budget now.");if(channel)sb.removeChannel(channel);S.plan=null;S.settings=null;S.txns=[];S.moves=[];S.events=[];S.tab="week";start();return}
+  if(val("del-confirm").trim().toUpperCase()!=="DELETE"){toast("Type DELETE to confirm");return}
+  try{const ls=await sb.storage.from("receipts").list(ME,{limit:1000});const files=(ls.data||[]).map(x=>`${ME}/${x.name}`);if(files.length)await sb.storage.from("receipts").remove(files)}catch(_){}
+  const r=await sb.rpc("wb_delete_my_account");if(r.error){toast(accountErr(r.error));return}
+  await sb.auth.signOut().catch(()=>{});if(channel)sb.removeChannel(channel);HID=null;ME=null;showLogin();toast("Your account is deleted");
+});
+
+/* ---------- stay up to date: reload when a new version is published ---------- */
+const BUILD="202609300804";
+async function checkUpdate(){
+  try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
+    const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
+    if(v&&v!==BUILD&&!typing&&!(S.rq||[]).some(q=>q.state==="reading"))location.reload();}catch(_){}
+}
+document.addEventListener("visibilitychange",()=>{if(!document.hidden)checkUpdate()});
+setInterval(checkUpdate,20*60*1000);
 
 /* ---------- sign in ---------- */
 const steps=n=>`<ol class="steps">${["Create your account","Start or join a household","Name your budget"].map((s,i)=>`<li class="${i+1<n?"done":i+1===n?"now":""}"><span>${i+1<n?"✓":i+1}</span>${s}</li>`).join("")}</ol>`;
