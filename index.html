@@ -625,7 +625,7 @@ function billsCard(){
   const t=new Date(),y=t.getFullYear(),m=t.getMonth();
   /* due before payday: this month's unpaid ones before payday, plus next month's early ones if payday crosses the month */
   const beforePay=dueBeforePayday("chase"),fromSav=dueBeforePayday("usaa");
-  const total=rows.reduce((s,r)=>s+billAmt(r.b,r.key),0),paidAmt=rows.filter(r=>r.paid).reduce((s,r)=>s+(paidInfo(r.key)?.amount??billAmt(r.b,r.key)),0);
+  const total=rows.reduce((s,r)=>s+billAmt(r.b,r.key),0),paidAmt=rows.reduce((s,r)=>s+(r.paid?(paidInfo(r.key)?.amount??billAmt(r.b,r.key)):paidSoFar(r.key)),0);
   const needAmt=rows.filter(r=>isVar(r.b)&&!r.paid&&S.plan?.varAmt?.[r.key]==null);
   const chase=acctBal("chase"),cover=chase-beforePay;
   const month=t.toLocaleDateString("en-US",{month:"long"});
@@ -652,27 +652,33 @@ function autopayOn(b){return !!dayOf(b)&&(isVar(b)?b.auto===true:b.auto!==false)
 function lastDayThisMonth(){const t=new Date();return new Date(t.getFullYear(),t.getMonth()+1,0).getDate()}
 function monthEndWindow(){return new Date().getDate()>=lastDayThisMonth()-2}
 function paidInfo(key){return (S.plan?.paidLog||[]).find(x=>x.key===key)}
+function paidSoFar(key){const i=paidInfo(key);return i?+i.amount||0:0}
+function billLeft(b,key){return Math.max(0,Math.round((billAmt(b,key)-paidSoFar(key))*100)/100)}
 function billRowHtml(r,today){
   const info=paidInfo(r.key);
   if(S.payOpen===r.key)return `<form class="item payform" id="payf" data-key="${esc(r.key)}" style="flex-wrap:wrap">
-    <div class="grow" style="flex-basis:100%"><b>${esc(r.b.name)}</b></div>
-    <label class="f" style="flex:1;min-width:110px">Amount paid<input id="pf-amt" inputmode="decimal" value="${esc(billAmt(r.b,r.key))}"></label>
+    <div class="grow" style="flex-basis:100%"><b>${esc(r.b.name)}</b>${paidSoFar(r.key)>0?` <span class="small muted">${m2(paidSoFar(r.key))} paid so far</span>`:""}</div>
+    ${isVar(r.b)?`<label class="f" style="flex:1;min-width:110px">This month's bill<input id="pf-total" inputmode="decimal" value="${esc(billAmt(r.b,r.key))}"></label>`:""}
+    <label class="f" style="flex:1;min-width:110px">Paying now<input id="pf-amt" inputmode="decimal" value="${esc(billLeft(r.b,r.key))}"></label>
     <label class="f" style="flex:1;min-width:130px">Date<input type="date" id="pf-date" value="${todayS()}"></label>
-    <div class="row" style="flex-basis:100%"><button class="btn" type="submit">Save as paid</button><button class="btn ghost" type="button" data-act="paycancel">Cancel</button></div></form>`;
+    <div class="small muted" style="flex-basis:100%">Paying less than the full amount? It stays open with the rest still due.</div>
+    <div class="row" style="flex-basis:100%"><button class="btn" type="submit">Save payment</button><button class="btn ghost" type="button" data-act="paycancel">Cancel</button></div></form>`;
   const va=isVar(r.b),hasAmt=S.plan?.varAmt?.[r.key]!=null;
   if(S.varOpen===r.key)return `<form class="item payform" id="varf" data-key="${esc(r.key)}" style="flex-wrap:wrap">
     <div class="grow" style="flex-basis:100%"><b>${esc(r.b.name)}</b> <span class="small muted">this month's bill</span></div>
     <label class="f" style="flex:1;min-width:120px">Amount<input id="vf-amt" inputmode="decimal" value="${hasAmt?esc(billAmt(r.b,r.key)):""}" placeholder="${esc(r.b.amt)}"></label>
     <div class="row" style="flex-basis:100%"><button class="btn" type="submit">Save amount</button><button class="btn ghost" type="button" data-act="varcancel">Cancel</button></div></form>`;
+  const part=!r.paid&&paidSoFar(r.key)>0,left=billLeft(r.b,r.key);
   const when=r.paid?`Paid${info?.date?" "+short(dn(info.date)):""}${info&&Math.abs(info.amount-billAmt(r.b,r.key))>0.004?` · ${m2(info.amount)}`:""}`
-    :r.due===null?"No due date":r.late?`Past due ${short(r.due)}`:r.due===today?"Due today":`Due ${short(r.due)}`;
+    :(part?`Partly paid · ${m2(paidSoFar(r.key))} of ${m2(billAmt(r.b,r.key))} · `:"")+(r.due===null?"No due date":r.late?`Past due ${short(r.due)}`:r.due===today?"Due today":`Due ${short(r.due)}`);
   return `<div class="item">
     <span class="dot ${r.paid?"ok":r.late?"late":""}" aria-hidden="true"></span>
     <div class="grow"><div style="${r.paid?"color:var(--muted)":""}">${esc(r.b.name)}</div>
       <div class="small ${r.late&&!r.paid?"":"muted"}" style="${r.late&&!r.paid?"color:var(--bad)":""}">${when}</div></div>
-    <div style="text-align:right"><b class="num" style="${r.paid?"color:var(--muted)":""}">${va&&!hasAmt&&!r.paid?"~":""}${m2(r.paid&&info?info.amount:billAmt(r.b,r.key))}</b>
+    <div style="text-align:right"><b class="num" style="${r.paid?"color:var(--muted)":part?"color:var(--warn)":""}">${va&&!hasAmt&&!r.paid?"~":""}${m2(r.paid&&info?info.amount:part?left:billAmt(r.b,r.key))}</b>${part?`<div class="small" style="color:var(--warn)">still due</div>`:""}
       ${va&&!r.paid?`<div class="small">${hasAmt?`<button class="x" data-act="varopen" data-key="${esc(r.key)}">Change</button>`:`<button class="x" data-act="varopen" data-key="${esc(r.key)}" style="color:var(--warn)">Enter amount</button>`}</div>`:""}</div>
     ${r.paid?`<button class="x" data-act="billundo" data-key="${esc(r.key)}">Undo</button>`
+      :part?`<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end"><button class="btn sm" data-act="payopen" data-key="${esc(r.key)}">Pay rest</button><button class="x" data-act="billundo" data-key="${esc(r.key)}">Undo</button></div>`
       :`<button class="btn sm" data-act="payopen" data-key="${esc(r.key)}">Paid</button>`}
   </div>`;
 }
@@ -684,7 +690,7 @@ function chaseDueUntil(end){
   const P=S.plan,phase=P.postClosing?"post":"pre",paid=new Set(P.paid||[]),today=dn(todayS());let sum=0;const items=[];
   const t=new Date();for(let k=0;k<3;k++){const y=t.getFullYear()+Math.floor((t.getMonth()+k)/12),m=(t.getMonth()+k)%12;
     for(const b of P.bills||[]){if(!(!b.phase||b.phase==="both"||b.phase===phase)||billAcct(b)!=="chase")continue;const d=dayOf(b);if(d===null)continue;
-      const due=dueIn(y,m,d),key=b.name+"|"+ds(due).slice(0,7);if(due<end&&!paid.has(key)&&due>=today-31){const am=billAmt(b,key);sum+=am;items.push({name:b.name,due,amt:am})}}}
+      const due=dueIn(y,m,d),key=b.name+"|"+ds(due).slice(0,7);if(due<end&&!paid.has(key)&&due>=today-31){const am=billLeft(b,key);sum+=am;items.push({name:b.name,due,amt:am})}}}
   return {sum:Math.round(sum*100)/100,items:items.sort((a,b)=>a.due-b.due)};
 }
 function incomeSplit(amt,src,dateS){
@@ -912,7 +918,7 @@ function goalEditForm(g,i,n){return `<form class="goal" id="goaledit" data-i="${
 /* ---------- autopay: bills come out on their due date ---------- */
 function dueBeforePayday(acct){
   if(!S.plan)return 0;const rows=billRows().filter(r=>!acct||billAcct(r.b)===acct),pay=nextPayday(),t=new Date(),y=t.getFullYear(),m=t.getMonth();let sum=0;
-  for(const r of rows){const d=dayOf(r.b);if(d===null)continue;if(!r.paid&&r.due<pay)sum+=billAmt(r.b,r.key);
+  for(const r of rows){const d=dayOf(r.b);if(d===null)continue;if(!r.paid&&r.due<pay)sum+=billLeft(r.b,r.key);
     const nx=dueIn(m===11?y+1:y,(m+1)%12,d);if(nx<pay&&nx>r.due)sum+=billAmt(r.b,r.b.name+"|"+ds(nx).slice(0,7))}
   return sum;
 }
@@ -923,8 +929,8 @@ function runAutopay(){
   for(const r of billRows()){
     if(!autopayOn(r.b)||r.paid||r.due>today||skip.has(r.key)||paid.has(r.key))continue;
     if(r.due<Math.max(start,r.b.added?dn(r.b.added):start))continue;
-    const amt=billAmt(r.b,r.key);paid.add(r.key);
-    P.paidLog=(P.paidLog||[]).filter(x=>x.key!==r.key).concat([{key:r.key,amount:amt,date:ds(r.due),auto:true,acct:billAcct(r.b)}]);
+    const amt=billLeft(r.b,r.key),before=paidSoFar(r.key);paid.add(r.key);
+    P.paidLog=(P.paidLog||[]).filter(x=>x.key!==r.key).concat([{key:r.key,amount:Math.round((before+amt)*100)/100,date:ds(r.due),auto:true,acct:billAcct(r.b)}]);
     acctAdjust(billAcct(r.b),-amt);changed++;
   }
   if(changed){P.paid=[...paid];savePlan();toast(`${changed} bill${changed>1?"s":""} paid automatically`)}
@@ -1253,8 +1259,8 @@ document.addEventListener("click",async e=>{
   if(a==="billedit"){S.billEdit=+b.dataset.i;render();return}
   if(a==="billcancel"){S.billEdit=null;render();return}
   if(a==="blseg"){const g=b.closest("[data-grp]");g.querySelectorAll("button").forEach(x=>x.setAttribute("aria-pressed",String(x===b)));refreshBillHint();return}
-  if(a==="quickpaid"){const k=b.dataset.key,bill=(S.plan.bills||[]).find(x=>k.startsWith(x.name+"|"));if(!bill)return;const amt=+bill.amt||0,acct=billAcct(bill);
-    acctAdjust(acct,-amt);S.plan.paid=[...new Set([...(S.plan.paid||[]),k])];S.plan.paidLog=(S.plan.paidLog||[]).filter(x=>x.key!==k).concat([{key:k,amount:amt,date:todayS(),acct}]);
+  if(a==="quickpaid"){const k=b.dataset.key,bill=(S.plan.bills||[]).find(x=>k.startsWith(x.name+"|"));if(!bill)return;const amt=billLeft(bill,k),acct=billAcct(bill),prev=paidInfo(k);
+    acctAdjust(acct,-amt);S.plan.paid=[...new Set([...(S.plan.paid||[]),k])];S.plan.paidLog=(S.plan.paidLog||[]).filter(x=>x.key!==k).concat([{key:k,amount:Math.round((amt+(prev?+prev.amount||0:0))*100)/100,date:todayS(),acct}]);
     render();savePlan();toast(`${bill.name} marked paid`);return}
   if(a==="snooze"){S.plan.snooze={...(S.plan.snooze||{})};for(const k of Object.keys(S.plan.snooze))if(S.plan.snooze[k]!==todayS())delete S.plan.snooze[k];S.plan.snooze[b.dataset.key]=todayS();render();savePlan();return}
   if(a==="varopen"){S.varOpen=b.dataset.key;render();document.getElementById("vf-amt")?.focus();return}
@@ -1397,7 +1403,7 @@ document.addEventListener("submit",async e=>{
     const custom=(S.settings.custom||[]).concat([{id,name,shared:!!document.getElementById("cf-shared")?.checked}]);
     try{await saveSettings({custom,history:(S.settings.history||[]).filter(x=>x.from!==from).concat([entry])});toast(`${name} added`);f.reset()}catch(err){fail(err)}}
   if(f.id==="varf"){const k=f.dataset.key,v=num(val("vf-amt"));if(!(v>=0)){toast("Enter the amount");return}
-    const info=(S.plan.paidLog||[]).find(x=>x.key===k);if(info&&info.acct){acctAdjust(info.acct,-(v-(+info.amount||0)));info.amount=v}
+    const info=(S.plan.paidLog||[]).find(x=>x.key===k);if(info&&info.acct&&(S.plan.paid||[]).includes(k)){acctAdjust(info.acct,-(v-(+info.amount||0)));info.amount=v}
     S.plan.varAmt={...(S.plan.varAmt||{}),[k]:v};const cutoff=ds(dn(todayS())-100).slice(0,7);
     for(const x of Object.keys(S.plan.varAmt))if((x.split("|")[1]||"")<cutoff)delete S.plan.varAmt[x];
     S.varOpen=null;render();savePlan();toast("Saved")}
@@ -1408,12 +1414,18 @@ document.addEventListener("submit",async e=>{
     else{acctAdjust(acct,-amt);S.plan.paidLog=(S.plan.paidLog||[]).concat([{key:k,amount:amt,date,acct}])}
     S.plan.paid=[...new Set([...(S.plan.paid||[]),k])];S.plan.varAmt={...(S.plan.varAmt||{}),[k]:amt};
     S.vpPick=null;render();savePlan();toast(`${bill.name}: ${m2(amt)} saved`)}
-  if(f.id==="payf"){const k=f.dataset.key,amt=num(val("pf-amt"));if(!(amt>=0)){toast("Enter the amount paid");return}
-    const bill=(S.plan.bills||[]).find(x=>k.startsWith(x.name+"|")),acct=bill?billAcct(bill):"chase";acctAdjust(acct,-amt);
-    if(bill&&isVar(bill))S.plan.varAmt={...(S.plan.varAmt||{}),[k]:amt};
-    S.plan.paid=[...new Set([...(S.plan.paid||[]),k])];S.plan.paidLog=(S.plan.paidLog||[]).filter(x=>x.key!==k).concat([{key:k,amount:amt,date:val("pf-date")||todayS(),acct}]);
+  if(f.id==="payf"){const k=f.dataset.key,amt=num(val("pf-amt"));if(!(amt>0)){toast("Enter the amount paid");return}
+    const bill=(S.plan.bills||[]).find(x=>k.startsWith(x.name+"|")),acct=bill?billAcct(bill):"chase";
+    if(bill&&isVar(bill)){const tot=num(val("pf-total"));if(!(tot>0)){toast("Enter this month's bill");return}S.plan.varAmt={...(S.plan.varAmt||{}),[k]:tot}}
+    acctAdjust(acct,-amt);
+    const prev=paidInfo(k),date=val("pf-date")||todayS(),total=bill?billAmt(bill,k):amt;
+    const entry=prev?{...prev,amount:Math.round(((+prev.amount||0)+amt)*100)/100,date,parts:[...(prev.parts||[{amt:+prev.amount||0,date:prev.date}]),{amt,date}]}:{key:k,amount:amt,date,acct,parts:[{amt,date}]};
+    S.plan.paidLog=(S.plan.paidLog||[]).filter(x=>x.key!==k).concat([entry]);
+    const full=entry.amount>=total-0.004;
+    S.plan.paid=full?[...new Set([...(S.plan.paid||[]),k])]:(S.plan.paid||[]).filter(x=>x!==k);
+    if(!full){const cutoff=ds(dn(todayS())-100).slice(0,7);S.plan.paidLog=S.plan.paidLog.filter(x=>(x.key.split("|")[1]||"")>=cutoff);S.payOpen=null;render();savePlan();toast(`${m2(amt)} paid · ${m2(total-entry.amount)} still due`);return}
     const cutoff=ds(dn(todayS())-100).slice(0,7);S.plan.paid=S.plan.paid.filter(x=>(x.split("|")[1]||"")>=cutoff);S.plan.paidLog=S.plan.paidLog.filter(x=>(x.key.split("|")[1]||"")>=cutoff);
-    S.payOpen=null;render();savePlan();toast("Marked paid")}
+    S.payOpen=null;render();savePlan();toast(prev?"Paid in full":"Marked paid")}
   if(f.id==="incf"){const amt=num(val("if-amt"));if(!(amt>0)){toast("Enter the amount");return}
     const to=val("if-to");const inc={id:Date.now(),src:val("if-src"),amt,date:val("if-date")||todayS(),note:val("if-note").trim().slice(0,80),to:to===""?"":+to};
     if(document.getElementById("if-bal")?.checked){const d=depositPlan(amt,inc.src,inc.date,inc.to!=="");
@@ -1652,7 +1664,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202609301943";
+const BUILD="202609301949";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
