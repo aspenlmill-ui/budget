@@ -469,8 +469,9 @@ document.addEventListener("change",e=>{if(e.target.id==="sp-to"){S.spendSel=e.ta
 document.addEventListener("submit",async e=>{
   if(e.target.id!=="spendf")return;e.preventDefault();
   const k=val("sp-to"),amt=num(val("sp-amt")),note=val("sp-note").trim().slice(0,80);if(!(amt>0)){toast("Enter the amount");return}
-  S.spendSel=k;
-  if(k.startsWith("ev:")){try{await db.collection("txns").add({pool:"event:"+k.slice(3),amount:amt,note,cat:"",from:"week",date:todayS()});}catch(err){fail(err);return}}
+  S.spendSel=k;if(logBusy)return;
+  if(k.startsWith("ev:")){logBusy=true;const btn=e.target.querySelector('button[type="submit"]');if(btn){btn.disabled=true;btn.textContent="Saving…"}
+    try{await db.collection("txns").add({pool:"event:"+k.slice(3),amount:amt,note,cat:"",from:"week",date:todayS()});logBusy=false}catch(err){logBusy=false;render();fail(err);return}}
   else{const g=S.plan.goals[+k.slice(3)];g.saved=Math.round(((+g.saved||0)-amt)*100)/100;acctAdjust("usaa",-amt);
     S.plan.spendLog=(S.plan.spendLog||[]).concat([{goal:g.name,amt,note,date:todayS()}]).slice(-100);render();savePlan()}
   const cur=[...spendTargets().ev,...spendTargets().bk].find(x=>x.k===k)||(k.startsWith("bk:")?{name:S.plan.goals[+k.slice(3)].name,left:S.plan.goals[+k.slice(3)].saved}:null);
@@ -1199,6 +1200,7 @@ async function addMove(from,to,amount,reason){
 }
 const val=id=>document.getElementById(id)?.value??"";
 
+let logBusy=false;
 document.addEventListener("submit",async e=>{
   e.preventDefault();const f=e.target;
   if(f.id==="logf"){
@@ -1207,7 +1209,12 @@ document.addEventListener("submit",async e=>{
     const doc={pool,amount:amt,note:val("lf-note").trim().slice(0,80),
       cat:val("lf-cat"),from:document.getElementById("lf-cush")?.checked?"cushion":"week",
       date:val("lf-date")||todayS(),ts:Date.now(),by:S.owner?"owner":"partner"};
-    try{await db.collection("txns").add(doc);toast(`Logged ${m2(amt)}`);f.reset();render()}catch(err){fail(err)}
+    if(logBusy)return;logBusy=true;
+    const btn=f.querySelector('button[type="submit"]');if(btn){btn.disabled=true;btn.textContent="Saving…"}
+    const aEl=document.getElementById("lf-amt"),nEl=document.getElementById("lf-note"),was=[aEl?.value,nEl?.value];
+    if(aEl)aEl.value="";if(nEl)nEl.value="";
+    try{await db.collection("txns").add(doc);logBusy=false;toast(`Saved ${m2(amt)}${doc.note?" · "+doc.note:""}`);render()}
+    catch(err){logBusy=false;render();const a2=document.getElementById("lf-amt"),n2=document.getElementById("lf-note");if(a2)a2.value=was[0]||"";if(n2)n2.value=was[1]||"";fail(err)}
   }
   if(f.id==="movef"){
     const amt=num(val("mv-amt"));if(!(amt>0)){toast("Enter the amount");return}
@@ -1452,7 +1459,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202609300900";
+const BUILD="202609301229";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
