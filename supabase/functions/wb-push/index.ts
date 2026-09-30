@@ -130,13 +130,13 @@ Deno.serve(async (req) => {
     let title: string, body: string;
     if (resetTomorrow) {
       title = "Budgets refill tomorrow";
-      body = pools.map((p) => `${label(p)}: add ${money(out[p].nextBudget)} · ${money(out[p].left)} left → cushion`).join("\n");
+      body = pools.map((p) => `${label(p)}: add ${money(out[p].nextBudget - out[p].left)} (${money(out[p].left)} left → splurge)`).join("\n");
     } else {
       title = `${overall(out, pools, frac)} Tomorrow’s starting balance`;
       body = pools.map((p) => `${label(p)}: ${money(out[p].left)}${out[p].left < 0 ? " (over)" : ""}`).join("\n");
     }
     const mine = out[isOwner ? "aspen" : "grace"];
-    if (mine.cushion > 0) body += `\nSaved up: ${money(mine.cushion)}`;
+    if (mine.cushion > 0) body += `\nSplurge money: ${money(mine.cushion)}`;
     for (const e of ev) body += `\n${e.name}: ${money(e.left)} left`;
     const payload = JSON.stringify({ notification: { title, body, tag: `weekly-budget-${now.date}`, navigate: APP_URL } });
     try {

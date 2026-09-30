@@ -267,7 +267,7 @@ function graceView(){
       :`<div class="muted small">${m0(g.spent)} spent of ${m0(g.alloc)}</div>`}
     <div class="bar"><i style="width:${pct(g.spent,g.alloc)}%"></i></div>
     ${g.cushion>0?`<div class="chip">Saved from past weeks: ${m2(g.cushion)}</div>`:""}
-    <div class="muted small">${esc(pretty(nextReset()))}: ${m0(budgetFor("grace",nextReset()))} gets added${g.left>0?`, and the ${m2(g.left)} you have left goes to your saved money`:""}.</div>
+    <div class="muted small">${esc(pretty(nextReset()))}: your card gets topped back up to ${m0(budgetFor("grace",nextReset()))}${g.left>0?`. The ${m2(g.left)} you have left counts as your saved money`:""}.</div>
   </div>
   <div class="card pool st-${poolStatus(h,weekFrac(c))} ${h.left<0?"over":""}">
     <div class="bar" style="order:9"><i style="width:${pct(h.spent,h.alloc)}%"></i></div>
@@ -475,7 +475,7 @@ function weekTab(){
       <div class="left num">${m2(x.left)}</div>
       <div class="bar"><i style="width:${pct(x.spent,x.alloc)}%"></i></div>
       <div class="muted small">${m0(x.spent)} of ${m0(x.alloc)}${x.alloc!==x.budget?` <span title="Includes money moved">(budget ${m0(x.budget)})</span>`:""}</div>
-      <span class="chip ${x.cushion<0?"bad":""}">Cushion ${m2(x.cushion)}</span></div>`}).join("")}</div>
+      <span class="chip ${x.cushion<0?"bad":""}">Splurge ${m2(x.cushion)}</span></div>`}).join("")}</div>
     <div class="muted small">Cushion is what was left over before. Unspent money rolls in when the ${PER().noun} resets; overspending comes out of it.</div>
     ${logForm(pool,false)}
     <div class="card"><h2>${cap(PER().this)}: purchases</h2>${txList(list,false)}</div>
@@ -1151,17 +1151,18 @@ function applyNames(){const n=S.settings?.names||{};NAMES.household=n.household|
 /* ---------- Friday reload ---------- */
 function reloadCard(c){
   const n=nextReset();
-  const rows=POOLS.map(p=>({p,add:budgetFor(p,n),left:c[p].left,cush:c[p].cushion}));
-  const totalAdd=rows.reduce((s,r)=>s+r.add,0),totalLeft=rows.reduce((s,r)=>s+r.left,0);
+  const rows=POOLS.map(p=>{const next=budgetFor(p,n),left=c[p].left;return {p,next,left,top:Math.round((next-left)*100)/100,after:c[p].cushion+left}});
+  const totalTop=rows.reduce((s,r)=>s+r.top,0),totalLeft=rows.reduce((s,r)=>s+r.left,0);
   return `<div class="card"><h2>Reload ${esc(pretty(n))}</h2>
-    <div class="small muted">Add these amounts when it resets. Whatever is left now becomes cushion, so it isn't lost.</div>
+    <div class="small muted">Top each card back up to its full amount. What's still on the card stays there and gets counted as splurge money, so you only add the difference.</div>
     <div class="reload">${rows.map(r=>`<div class="rl">
-      <div class="rl-name">${esc(NAMES[r.p])}</div>
-      <div><div class="label">Add</div><b class="num">${m0(r.add)}</b></div>
-      <div><div class="label">Left → cushion</div><b class="num" style="color:${r.left<0?"var(--bad)":"var(--good)"}">${m2(r.left)}</b></div>
-      <div><div class="label">Cushion after</div><b class="num">${m2(r.cush+r.left)}</b></div></div>`).join("")}</div>
-    <div class="kv"><span>Total to add</span><b>${m0(totalAdd)}</b></div>
-    <div class="kv"><span>Total rolling into cushions</span><b>${m2(totalLeft)}</b></div>
+      <div class="rl-name">${esc(NAMES[r.p])}<div class="small muted" style="font-weight:400">back to ${m0(r.next)}</div></div>
+      <div><div class="label">Add</div><b class="num">${m2(r.top)}</b></div>
+      <div><div class="label">Left → splurge</div><b class="num" style="color:${r.left<0?"var(--bad)":"var(--good)"}">${m2(r.left)}</b></div>
+      <div><div class="label">Splurge after</div><b class="num">${m2(r.after)}</b></div></div>`).join("")}</div>
+    <div class="kv tot"><span><b>Total to add</b></span><b>${m2(totalTop)}</b></div>
+    <div class="kv"><span>Rolling into splurge</span><b>${m2(totalLeft)}</b></div>
+    <div class="small muted">Full amounts add up to ${m0(rows.reduce((s,r)=>s+r.next,0))}. The ${m2(totalLeft)} you didn't spend stays in your accounts as splurge money.</div>
   </div>`;
 }
 
@@ -1305,7 +1306,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202609300820";
+const BUILD="202609300825";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
