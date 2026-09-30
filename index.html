@@ -51,7 +51,7 @@ section{display:flex;flex-direction:column;gap:12px}
 .pool.over .bar i{background:var(--bad)}
 .st-fire .bar i{background:var(--fire)}.st-good .bar i{background:var(--good)}.st-warn .bar i{background:var(--warn)}.st-bad .bar i{background:var(--bad)}
 .status{display:flex;align-items:center;gap:12px;border-radius:var(--r);padding:14px 16px;border:1px solid var(--line)}
-.status .em{font-size:30px;line-height:1}
+.status .em{font-size:30px;line-height:1;width:40px;flex:none;text-align:center}
 .status b{display:block;font-family:var(--display);font-size:18px}
 .status.fire{background:var(--fire-soft);border-color:var(--fire)}.status.fire b{color:var(--fire)}
 .status.good{background:var(--good-soft);border-color:var(--good)}.status.good b{color:var(--good)}
@@ -442,8 +442,9 @@ function overallStatus(c,pools){
   return "good";
 }
 const STATUS={fire:["🌋","Volcano hot","Way under pace. The herd is thriving."],good:["🦖","On track","Right where you should be. All quiet in the jungle."],warn:["🦴","Raptor alert","Something is getting close to its limit. Tread carefully."],bad:["☄️","Extinction event","A card is over and its splurge can't cover it. Move money or pause spending."]};
+const CLAW=`<svg viewBox="0 0 64 64" width="1.25em" height="1.25em" style="vertical-align:-.2em;display:inline-block"><path d="M20 58c-4-2-6-8-6-14 0-14 8-28 20-36 8-5 18-7 26-4-8 2-15 6-20 12-7 8-10 18-9 28 1 6 3 10 6 13z" fill="#EFE3C8" stroke="#4A3620" stroke-width="3.5" stroke-linejoin="round"/><path d="M26 30c4-7 9-12 16-16" fill="none" stroke="#C9B48E" stroke-width="3" stroke-linecap="round"/><rect x="10" y="50" width="30" height="11" rx="5.5" fill="#6B4E2E" stroke="#4A3620" stroke-width="3"/></svg>`;
 function statusBanner(c,pools){const s=overallStatus(c,pools),[em,t,d]=STATUS[s];
-  return `<div class="status ${s}"><span class="em" aria-hidden="true">${em}</span><div><b>${t}</b><div class="small muted">${d}</div></div></div>`}
+  return `<div class="status ${s}"><span class="em" aria-hidden="true">${s==="warn"?CLAW:em}</span><div><b>${t}</b><div class="small muted">${d}</div></div></div>`}
 
 
 /* ---------- getting started checklist (owner) ---------- */
@@ -1650,7 +1651,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202609301933";
+const BUILD="202609301935";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
