@@ -544,6 +544,7 @@ function billRows(){
     return {...x,due,key,paid:paid.has(key),late:!paid.has(key)&&due<today};
   }).sort((a,b)=>(a.due??1e9)-(b.due??1e9));
 }
+function ordinal(n){const s=["th","st","nd","rd"],v=n%100;return n+(s[(v-20)%10]||s[v]||s[0])}
 function ym(y,m){return `${y}-${pad(m+1)}`}
 function billsCard(){
   const P=S.plan,rows=billRows(),pay=nextPayday(),today=dn(todayS()),lb=L();
@@ -565,12 +566,13 @@ function billsCard(){
     <div class="list" style="margin-top:6px">${rows.map(r=>billRowHtml(r,today)).join("")}</div>
     <details style="margin-top:8px"><summary class="small"><b>Edit bills</b></summary>
       <div class="tbl" style="margin-top:8px">${(P.bills||[]).map((b,i)=>`<div class="bill">
-        <div style="min-width:0"><div>${esc(b.name)}</div><div class="meta">${b.day?"Due "+esc(b.day):"No date"}${b.phase!=="both"?` · ${b.phase==="pre"?"until closing":"after closing"}`:""}</div></div>
+        <div style="min-width:0"><div>${esc(b.name)}</div><div class="meta">${dayOf(b)?"Due the "+ordinal(dayOf(b)):"No due date"}${b.phase!=="both"?` · ${b.phase==="pre"?"until closing":"after closing"}`:""}</div></div>
         <input data-plan="bills.${i}.amt" inputmode="decimal" value="${esc(b.amt)}" aria-label="${esc(b.name)} amount">
-        <div class="meta" style="grid-column:1/-1;display:flex;gap:14px;flex-wrap:wrap">
+        <button class="x" data-act="delbill" data-i="${i}" aria-label="Remove ${esc(b.name)}">✕</button>
+        <div class="meta" style="grid-column:1/-1;display:flex;gap:14px;flex-wrap:wrap;align-items:center">
+          <label class="check small">Due day <input data-billday="${i}" inputmode="numeric" value="${dayOf(b)??""}" placeholder="1–31" aria-label="${esc(b.name)} due day" style="width:58px;padding:4px 6px;font-size:14px"></label>
           <label class="check small"><input type="checkbox" data-act="billauto" data-i="${i}" ${b.auto===false?"":"checked"}> Autopay on due date</label>
-          <label class="check small">From <select data-act="billfrom" data-i="${i}" style="width:auto;padding:4px 6px;font-size:13px"><option value="bills" ${b.from!=="savings"?"selected":""}>${esc(L().bills)}</option><option value="savings" ${b.from==="savings"?"selected":""}>${esc(L().save)}</option></select></label></div>
-        <button class="x" data-act="delbill" data-i="${i}" aria-label="Remove ${esc(b.name)}">✕</button></div>`).join("")}</div>
+          <label class="check small">From <select data-act="billfrom" data-i="${i}" style="width:auto;padding:4px 6px;font-size:13px"><option value="bills" ${b.from!=="savings"?"selected":""}>${esc(L().bills)}</option><option value="savings" ${b.from==="savings"?"selected":""}>${esc(L().save)}</option></select></label></div></div>`).join("")}</div>
       <form class="form" id="billf" style="margin-top:10px">
         <div class="row"><label class="f">New bill<input id="bf-name" placeholder="Electric"></label>
           <label class="f">Monthly<input id="bf-amt" inputmode="decimal" placeholder="0.00"></label></div>
@@ -1058,6 +1060,10 @@ document.addEventListener("click",async e=>{
 
 document.addEventListener("change",e=>{
   const el=e.target;
+  if(el.dataset.billday!=null&&S.plan){const b=S.plan.bills[+el.dataset.billday],s=el.value.trim();
+    if(s===""){b.day="";render();savePlan();toast(`${b.name} has no due date now`);return}
+    const v=parseInt(s,10);if(!(v>=1&&v<=31)){toast("Enter a day from 1 to 31");el.value=dayOf(b)??"";return}
+    b.day=String(v);render();savePlan();toast(`${b.name} is now due the ${ordinal(v)}`);return}
   if(el.dataset.plan&&S.plan){const v=num(el.value);if(!isFinite(v)){toast("Enter a number");return}
     setPath(S.plan,el.dataset.plan,v);if(el.dataset.plan.startsWith("accounts.")||el.dataset.plan.startsWith("otherAccts."))S.plan.accounts.updated=todayS();render();savePlan()}
   if(el.dataset.route!=null&&S.plan){const r=S.plan.routing[+el.dataset.route];if(el.dataset.k==="amt"){const v=num(el.value);if(!isFinite(v)){toast("Enter a number");return}r.amt=v}else r.name=el.value.trim().slice(0,40)||"Line";render();savePlan();return}
@@ -1299,7 +1305,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202609300817";
+const BUILD="202609300820";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
