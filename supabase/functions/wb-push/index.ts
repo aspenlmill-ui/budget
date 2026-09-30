@@ -199,9 +199,9 @@ Deno.serve(async (req) => {
     const c = cache[ck] as any;
     if (!c) { failed++; continue; }
     const isOwner = c.owner === sub.user_id;
-    const { out, names, customs, ev, resetTomorrow, frac } = c.s;
-    const pools: string[] = isOwner ? ["aspen", "household", "extras", ...customs.map((x: any) => x.id)]
-      : ["grace", "household", ...customs.filter((x: any) => x.shared).map((x: any) => x.id)];
+    const { out, names, resetTomorrow, frac } = c.s;
+    // Nightly: just your own money and Household.
+    const pools: string[] = [isOwner ? "aspen" : "grace", "household"];
     const label = (p: string) => (p === (isOwner ? "aspen" : "grace") ? "My Money" : names[p]);
     let title: string, body: string;
     if (resetTomorrow) {
@@ -211,9 +211,6 @@ Deno.serve(async (req) => {
       title = `${overall(out, pools, frac)} Tomorrow’s starting balance`;
       body = pools.map((p) => `${label(p)}: ${money(out[p].left)}${out[p].left < 0 ? " (over)" : ""}`).join("\n");
     }
-    const mine = out[isOwner ? "aspen" : "grace"];
-    if (mine.cushion > 0) body += `\nSplurge money: ${money(mine.cushion)}`;
-    for (const e of ev) body += `\n${e.name}: ${money(e.left)} left`;
     const payload = JSON.stringify({ notification: { title, body, tag: `weekly-budget-${now.date}`, navigate: APP_URL } });
     try {
       await webpush.sendNotification({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth_key } }, payload, { TTL: 3600 });
