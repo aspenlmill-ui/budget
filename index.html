@@ -1111,7 +1111,9 @@ function setupTab(){
       <button type="button" data-act="access" data-v="simple" aria-pressed="${!S.settings?.partnerFull}">Just their money</button>
       <button type="button" data-act="access" data-v="full" aria-pressed="${!!S.settings?.partnerFull}">Everything</button></div>
       <div class="small muted" style="margin-top:8px">${S.settings?.partnerFull?`${esc(NAMES.grace)} has the same app you do: every tab, bills, balances, savings and moving money, and can change anything. The only thing kept private is what each of you writes down for a purchase on your own card.`:`${esc(NAMES.grace)} sees only their own card, plus whatever you turn on below.`}</div>
-      ${S.settings?.partnerFull?"":`<button class="btn ghost" data-act="view" data-v="grace" style="margin-top:10px">Preview ${esc(NAMES.grace)}'s screen</button>`}</div>`:""}
+      ${S.settings?.partnerFull?"":`<button class="btn ghost" data-act="view" data-v="grace" style="margin-top:10px">Preview ${esc(NAMES.grace)}'s screen</button>`}
+      <button class="btn ${S.settings?.seeSpending?"":"ghost"}" data-act="seespend" aria-pressed="${!!S.settings?.seeSpending}" style="margin-top:10px">${S.settings?.seeSpending?"✓ Seeing each other's spending":"See spending"}</button>
+      <div class="small muted" style="margin-top:6px">${S.settings?.seeSpending?`You and ${esc(NAMES.grace)} both see what the other bought on your own cards, including receipt photos. Tap again to make it private.`:`Turn on to let you and ${esc(NAMES.grace)} see what the other bought on your own cards. Right now each of you only sees amounts.`}</div></div>`:""}
     ${S.owner&&!S.settings?.partnerFull?partnerShowCard():""}
     ${S.owner&&S.joinCode?`<div class="card"><h2>Invite ${esc(NAMES.grace)}</h2><div class="small muted">${esc(NAMES.grace)} creates an account in this app, picks "Join your partner" and types this code.</div>
       <div class="num" style="font-size:28px;font-weight:700;letter-spacing:.12em;margin-top:8px;user-select:all">${esc(S.joinCode)}</div></div>`:""}
@@ -1137,7 +1139,7 @@ function firstRun(){
 function setPath(obj,path,val){const k=path.split(".");let o=obj;for(let i=0;i<k.length-1;i++){o=o[k[i]]??(o[k[i]]={})}o[k[k.length-1]]=val}
 let planQ=Promise.resolve();
 function savePlan(){const body=JSON.parse(JSON.stringify(S.plan));planQ=planQ.then(()=>db.doc("private/plan").set(body)).catch(fail);return planQ}
-async function saveSettings(patch){const cur=S.settings||{};const body={anchor:cur.anchor||anchor(),history:cur.history||[],starts:cur.starts||[],names:cur.names||{},title:cur.title||"",custom:cur.custom||[],periods:cur.periods||[{from:cur.anchor||anchor(),kind:"week"}],onboardDone:!!cur.onboardDone,partnerFull:!!cur.partnerFull,partnerHide:cur.partnerHide||[],...patch};
+async function saveSettings(patch){const cur=S.settings||{};const body={anchor:cur.anchor||anchor(),history:cur.history||[],starts:cur.starts||[],names:cur.names||{},title:cur.title||"",custom:cur.custom||[],periods:cur.periods||[{from:cur.anchor||anchor(),kind:"week"}],onboardDone:!!cur.onboardDone,partnerFull:!!cur.partnerFull,partnerHide:cur.partnerHide||[],seeSpending:!!cur.seeSpending,...patch};
   await db.doc("settings/budget").set(JSON.parse(JSON.stringify(body)))}
 function arm(b,label){if(b.classList.contains("armed"))return true;b.classList.add("armed");b.dataset.t0=b.textContent;b.textContent=label||"Tap again";setTimeout(()=>{b.classList.remove("armed");b.textContent=b.dataset.t0},3500);return false}
 
@@ -1163,6 +1165,7 @@ document.addEventListener("click",async e=>{
     try{if(k.startsWith("custom:")){const id=k.slice(7);await saveSettings({custom:(S.settings.custom||[]).map(c=>c.id===id?{...c,shared:on}:c)})}
       else{const h=new Set(S.settings?.partnerHide||[]);on?h.delete(k):h.add(k);await saveSettings({partnerHide:[...h]})}
       toast(on?`${NAMES.grace} can see it`:`Hidden from ${NAMES.grace}`)}catch(err){fail(err)}return}
+  if(a==="seespend"){const on=!S.settings?.seeSpending;try{await saveSettings({seeSpending:on});await LOAD.txns();render();toast(on?"You can both see each other's spending":"Spending details are private again")}catch(err){fail(err)}return}
   if(a==="access"){try{await saveSettings({partnerFull:b.dataset.v==="full"});toast(b.dataset.v==="full"?`${NAMES.grace} can now see everything`:`${NAMES.grace} sees just their money`)}catch(err){fail(err)}return}
   if(a==="gshide"){if(!arm(b,"Tap again to hide"))return;try{await saveSettings({onboardDone:true})}catch(err){fail(err)}return}
   if(a==="tab"){S.tab=b.dataset.t;try{localStorage.setItem("mfb-tab",S.tab)}catch(_){}render();return}
@@ -1504,7 +1507,8 @@ const mapTx=r=>({id:r.id,pool:r.pool,amount:+r.amount,note:r.note||"",cat:r.cat|
 const mapMv=r=>({id:r.id,from:r.from_ep,to:r.to_ep,amount:+r.amount,reason:r.reason||"",date:r.date,ts:Date.parse(r.created_at)});
 const mapEv=r=>({id:r.id,name:r.name,budget:+r.budget,active:r.active,created:Date.parse(r.created_at)});
 const LOAD={
-  settings:async()=>{const d=chk(await sb.from("wb_settings").select("data").eq("household_id",HID).maybeSingle());S.settings=d?d.data:null;S.settingsLoaded=true;applyNames();if(S.ready&&!S.owner){const f=!!S.settings?.partnerFull;if(f!==S.full){S.full=f;S.view=f?"aspen":"grace";if(f)LOAD.plan().then(render).catch(()=>{})}}},
+  settings:async()=>{const d=chk(await sb.from("wb_settings").select("data").eq("household_id",HID).maybeSingle());const wasSee=!!S.settings?.seeSpending;S.settings=d?d.data:null;
+    if(S.ready&&wasSee!==!!S.settings?.seeSpending)LOAD.txns().then(render).catch(()=>{});S.settingsLoaded=true;applyNames();if(S.ready&&!S.owner){const f=!!S.settings?.partnerFull;if(f!==S.full){S.full=f;S.view=f?"aspen":"grace";if(f)LOAD.plan().then(render).catch(()=>{})}}},
   txns:async()=>{const [t,n]=await Promise.all([sb.from("wb_txns").select("*").eq("household_id",HID).order("created_at"),sb.from("wb_txn_notes").select("txn_id,note,cat,receipt").eq("household_id",HID)]);
     const notes=Object.fromEntries((chk(n)||[]).map(x=>[x.txn_id,x]));
     S.txns=(chk(t)||[]).map(r=>{const x=mapTx(r),nn=notes[r.id];if(nn){x.note=nn.note||"";x.cat=nn.cat||"";x.receipt=nn.receipt||""}return x})},
@@ -1566,7 +1570,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202609301319";
+const BUILD="202609301324";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
