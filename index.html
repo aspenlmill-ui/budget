@@ -299,7 +299,15 @@ function evStats(e){const key="event:"+e.id;
   let budget=+e.budget||0;for(const m of S.moves){if(m.to===key)budget+=m.amount;if(m.from===key)budget-=m.amount}
   const tx=S.txns.filter(t=>t.pool===key).sort((a,b)=>b.ts-a.ts);const spent=tx.reduce((s,t)=>s+t.amount,0);
   return {budget,spent,left:budget-spent,tx}}
-function eventCard(e,owner){const s=evStats(e);return `<div class="card pool ${s.left<0?"over":""}">
+function eventCard(e,owner){const s=evStats(e);
+  if(owner&&S.evEdit===e.id)return `<form class="card form" id="evedf" data-id="${esc(e.id)}"><h2>Edit ${esc(e.name)}</h2>
+    <div class="row"><label class="f">Name<input id="ee-name" value="${esc(e.name)}" autocomplete="off"></label>
+      <label class="f">Budget<input id="ee-amt" inputmode="decimal" value="${esc(e.budget)}"></label></div>
+    <div class="small muted">${m2(s.spent)} spent so far. Money you moved in or out stays as it is.</div>
+    <div class="row"><button class="btn" type="submit">Save</button><button class="btn ghost" type="button" data-act="evcancel">Cancel</button></div>
+    <button class="x" type="button" data-act="evdel" data-id="${esc(e.id)}" style="color:var(--bad);align-self:flex-start">Delete this budget${s.tx.length?` and its ${s.tx.length} purchase${s.tx.length>1?"s":""}`:""}</button>
+  </form>`;
+  return `<div class="card pool ${s.left<0?"over":""}">
   <div class="top" style="display:flex;justify-content:space-between;gap:8px;align-items:baseline"><div class="label">${esc(e.name)}</div>${e.active===false?`<span class="chip">Closed</span>`:""}</div>
   <div class="left num">${m2(s.left)}</div>
   <div class="bar"><i style="width:${pct(s.spent,s.budget)}%"></i></div>
@@ -307,7 +315,7 @@ function eventCard(e,owner){const s=evStats(e);return `<div class="card pool ${s
   ${owner&&s.tx.length?`<details><summary class="small">What was bought (${s.tx.length})</summary>${txList(s.tx,false,true)}</details>`:""}
   ${owner?`<div class="row" style="margin-top:4px">${e.active===false
       ?`<button class="btn sm ghost" data-act="evopen" data-id="${esc(e.id)}">Reopen</button>`
-      :`<button class="btn sm ghost" data-act="evclose" data-id="${esc(e.id)}">Close it out</button>`}</div>`:""}
+      :`<button class="btn sm ghost" data-act="evclose" data-id="${esc(e.id)}">Close it out</button>`}<button class="btn sm ghost" data-act="evedit" data-id="${esc(e.id)}">Edit or delete</button></div>`:""}
 </div>`}
 
 function specialTab(){
@@ -1163,6 +1171,14 @@ document.addEventListener("click",async e=>{
   if(a==="scapply"){const r=S.scen;if(!r)return;for(const s of r.steps)if(s.ep)await addMove(s.ep,`week:${r.pool}`,s.x,"What-if: cover a purchase");S.scen=null;render();return}
   if(a==="billpaid"){const k=b.dataset.key,set=new Set(S.plan.paid||[]);if(b.checked)set.add(k);else set.delete(k);
     const cutoff=ds(dn(todayS())-100).slice(0,7);S.plan.paid=[...set].filter(x=>(x.split("|")[1]||"")>=cutoff);render();savePlan();return}
+  if(a==="evedit"){S.evEdit=b.dataset.id;render();return}
+  if(a==="evcancel"){S.evEdit=null;render();return}
+  if(a==="evdel"){if(!arm(b,"Tap again to delete for good"))return;const id=b.dataset.id,ep="event:"+id;
+    try{chk(await sb.from("wb_txns").delete().eq("household_id",HID).eq("pool",ep));
+      chk(await sb.from("wb_moves").delete().eq("household_id",HID).or(`from_ep.eq.${ep},to_ep.eq.${ep}`));
+      chk(await sb.from("wb_events").delete().eq("id",id));
+      if((S.settings?.partnerHide||[]).includes(ep))await saveSettings({partnerHide:S.settings.partnerHide.filter(x=>x!==ep)});
+      S.evEdit=null;await Promise.all([LOAD.txns(),LOAD.moves(),LOAD.events()]);render();toast("Deleted")}catch(err){fail(err)}return}
   if(a==="evclose"||a==="evopen"){if(a==="evclose"&&!arm(b,"Tap again to close"))return;
     try{await db.doc("events/"+b.dataset.id).update({active:a==="evopen"});toast(a==="evopen"?"Reopened":"Closed out")}catch(err){fail(err)}return}
   if(a==="catshare"||a==="catdel"){if(a==="catdel"&&!arm(b,"Tap again to remove"))return;
@@ -1208,6 +1224,9 @@ const val=id=>document.getElementById(id)?.value??"";
 let logBusy=false;
 document.addEventListener("submit",async e=>{
   e.preventDefault();const f=e.target;
+  if(f.id==="evedf"){const name=val("ee-name").trim().slice(0,60),amt=num(val("ee-amt"));
+    if(!name||!(amt>=0)){toast("Add a name and an amount");return}
+    try{await db.doc("events/"+f.dataset.id).update({name,budget:amt});S.evEdit=null;render();toast("Saved")}catch(err){fail(err)}}
   if(f.id==="logf"){
     const amt=num(val("lf-amt"));if(!(amt>0)){toast("Enter the amount");return}
     const pool=document.querySelector('#logf [data-act="pool"][aria-pressed="true"]')?.dataset.p||"aspen";
@@ -1476,7 +1495,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202609301251";
+const BUILD="202609301254";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
