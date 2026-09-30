@@ -143,7 +143,7 @@ Deno.serve(async (req) => {
       }
     } catch (e: any) {
       const status = e?.statusCode ?? e?.status;
-      if (status === 404 || status === 410) { await supabase.from("push_subscriptions").delete().eq("id", sub.id); removed++; }
+      if (status === 404 || status === 410 || (status === 400 && String(e?.body || "").includes("VapidPkHashMismatch"))) { await supabase.from("push_subscriptions").delete().eq("id", sub.id); removed++; }
       else { console.error(e); failed++; }
     }
   }
