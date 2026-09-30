@@ -16,8 +16,10 @@ const dn = (s: string) => { const [y, m, d] = s.split("-").map(Number); return M
 const money = (v: number) => (v < 0 ? "-$" : "$") + Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const BASE = ["household", "aspen", "grace", "extras"];
 
-function easternNow() {
-  const p = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23" }).formatToParts(new Date());
+function localNow(tz?: string) {
+  let zone = tz || "America/New_York";
+  try { new Intl.DateTimeFormat("en-US", { timeZone: zone }); } catch { zone = "America/New_York"; }
+  const p = new Intl.DateTimeFormat("en-US", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23" }).formatToParts(new Date());
   const g = (t: string) => p.find((x) => x.type === t)?.value ?? "";
   return { date: `${g("year")}-${g("month")}-${g("day")}`, hour: Number(g("hour")) };
 }
@@ -113,12 +115,12 @@ function manualDue(plan: any, today: string) {
 }
 
 // deno-lint-ignore no-explicit-any
-async function billCheck(now: { date: string }, force: boolean, only: string | null) {
-  const { data: subs } = await supabase.from("push_subscriptions").select("id,user_id,endpoint,p256dh,auth_key");
+async function billCheck(subs: any[], force: boolean, only: string | null) {
   let sent = 0, skipped = 0, removed = 0;
   const done = new Set<string>();
   for (const sub of subs ?? []) {
     if (only && sub.user_id !== only) continue;
+    const now = localNow(sub.tz);
     if (!force && !done.has(sub.user_id)) {
       const { data: already } = await supabase.from("notification_send_log").select("id").eq("user_id", sub.user_id).eq("local_date", now.date).eq("notification_type", "bill_check").maybeSingle();
       if (already) { skipped++; continue; }
@@ -158,20 +160,23 @@ Deno.serve(async (req) => {
   if (req.method === "GET" && url.searchParams.get("key") === "1") return Response.json({ publicKey: VAPID_PUBLIC_KEY }, { headers: cors });
   if (req.headers.get("x-cron-secret") !== CRON_SECRET) return new Response("Unauthorized", { status: 401 });
 
-  const now = easternNow();
   const force = url.searchParams.get("force") === "1";
   const only = url.searchParams.get("user");
-  if ((force && url.searchParams.get("kind") === "bills") || (!force && now.hour === 17)) return Response.json({ ok: true, eastern: now, ...(await billCheck(now, force, only)) });
-  if (!force && now.hour !== 19) return Response.json({ ok: true, skipped: true, eastern: now });
-
-  const { data: subs, error } = await supabase.from("push_subscriptions").select("id,user_id,endpoint,p256dh,auth_key");
+  const kind = url.searchParams.get("kind");
+  const { data: allSubs, error } = await supabase.from("push_subscriptions").select("id,user_id,endpoint,p256dh,auth_key,tz");
   if (error) return Response.json({ ok: false, error: error.message }, { status: 500 });
+  // Each phone gets its own 5 PM bill check and 7 PM balance, in its own time zone.
+  const at = (h: number) => (allSubs ?? []).filter((x) => localNow(x.tz).hour === h);
+  const bills = force ? (kind === "bills" ? await billCheck(allSubs ?? [], true, only) : null) : await billCheck(at(17), false, only);
+  if (force && kind === "bills") return Response.json({ ok: true, ...bills });
+  const subs = force ? (allSubs ?? []) : at(19);
   let sent = 0, skipped = 0, removed = 0, failed = 0;
   const cache: Record<string, unknown> = {};
   const sentToday = new Set<string>();
 
   for (const sub of subs ?? []) {
     if (only && sub.user_id !== only) continue;
+    const now = localNow(sub.tz);
     if (!force && !sentToday.has(sub.user_id)) {
       const { data: already } = await supabase.from("notification_send_log").select("id").eq("user_id", sub.user_id).eq("local_date", now.date).eq("notification_type", "weekly_balance").maybeSingle();
       if (already) { skipped++; continue; }
@@ -179,7 +184,8 @@ Deno.serve(async (req) => {
     const { data: member } = await supabase.from("household_members").select("household_id").eq("user_id", sub.user_id).maybeSingle();
     if (!member?.household_id) { failed++; continue; }
     const hid = member.household_id;
-    if (!cache[hid]) {
+    const ck = hid + "|" + now.date;
+    if (!(ck in cache)) {
       const [{ data: hh }, { data: st }, { data: tx }, { data: mv }, { data: ev }] = await Promise.all([
         supabase.from("households").select("created_by").eq("id", hid).maybeSingle(),
         supabase.from("wb_settings").select("data").eq("household_id", hid).maybeSingle(),
@@ -187,10 +193,10 @@ Deno.serve(async (req) => {
         supabase.from("wb_moves").select("from_ep,to_ep,amount,date").eq("household_id", hid),
         supabase.from("wb_events").select("id,name,budget,active").eq("household_id", hid),
       ]);
-      if (!st?.data) { cache[hid] = null; } else cache[hid] = { owner: hh?.created_by, s: summarize(st.data, tx ?? [], mv ?? [], ev ?? [], now.date) };
+      if (!st?.data) { cache[ck] = null; } else cache[ck] = { owner: hh?.created_by, s: summarize(st.data, tx ?? [], mv ?? [], ev ?? [], now.date) };
     }
     // deno-lint-ignore no-explicit-any
-    const c = cache[hid] as any;
+    const c = cache[ck] as any;
     if (!c) { failed++; continue; }
     const isOwner = c.owner === sub.user_id;
     const { out, names, customs, ev, resetTomorrow, frac } = c.s;
@@ -222,5 +228,5 @@ Deno.serve(async (req) => {
       else { console.error(e); failed++; }
     }
   }
-  return Response.json({ ok: true, eastern: now, sent, skipped, removed, failed, force });
+  return Response.json({ ok: true, bills, sent, skipped, removed, failed, force });
 });

@@ -569,7 +569,8 @@ function moveTab(){
 }
 
 /* ---------- plan (owner only; stored so only the owner can read it) ---------- */
-function billTotal(phase){return (S.plan?.bills||[]).filter(b=>b.phase==="both"||b.phase===phase).reduce((s,b)=>s+(+b.amt||0),0)}
+function billTotal(phase){return (S.plan?.bills||[]).filter(b=>!b.phase||b.phase==="both"||b.phase===phase).reduce((s,b)=>s+(+b.amt||0),0)}
+const closingOn=()=>!!S.plan?.closingMode;
 const L=()=>({save:S.plan?.labels?.save||"USAA",bills:S.plan?.labels?.bills||"Chase"});
 const BLANK_PLAN={accounts:{usaa:0,chase:0},otherAccts:[],floor:0,bills:[],debts:[],goals:[{name:"Emergency fund",saved:0,target:1000,monthly:0,when:"Start here",done:false},{name:"Car repairs",saved:0,target:0,monthly:0,when:"",done:false},{name:"Holidays and birthdays",saved:0,target:0,monthly:0,when:"",done:false},{name:"Vacation",saved:0,target:0,monthly:0,when:"",done:false}],paid:[],paycheck:{aspen:0,grace:0,graceBills:0},postClosing:false,labels:{save:"Savings",bills:"Bills account"}};
 
@@ -580,7 +581,7 @@ function nextPayday(){const a=dn(S.plan?.payAnchor||anchor()),t=dn(todayS());let
 function billRows(){
   const P=S.plan,phase=P.postClosing?"post":"pre",t=new Date(),y=t.getFullYear(),m=t.getMonth(),today=dn(todayS());
   const paid=new Set(P.paid||[]);
-  return (P.bills||[]).map((b,i)=>({b,i})).filter(x=>x.b.phase==="both"||x.b.phase===phase).map(x=>{
+  return (P.bills||[]).map((b,i)=>({b,i})).filter(x=>!x.b.phase||x.b.phase==="both"||x.b.phase===phase).map(x=>{
     const d=dayOf(x.b);if(d===null)return {...x,due:null,paid:paid.has(x.b.name+"|"+ym(y,m)),key:x.b.name+"|"+ym(y,m)};
     const due=dueIn(y,m,d),key=x.b.name+"|"+ds(due).slice(0,7);
     return {...x,due,key,paid:paid.has(key),late:!paid.has(key)&&due<today};
@@ -650,7 +651,7 @@ function incomeSources(){return [["mine",`${NAMES.aspen}'s paycheck`],["partner"
 function chaseDueUntil(end){
   const P=S.plan,phase=P.postClosing?"post":"pre",paid=new Set(P.paid||[]),today=dn(todayS());let sum=0;const items=[];
   const t=new Date();for(let k=0;k<3;k++){const y=t.getFullYear()+Math.floor((t.getMonth()+k)/12),m=(t.getMonth()+k)%12;
-    for(const b of P.bills||[]){if(!(b.phase==="both"||b.phase===phase)||billAcct(b)!=="chase")continue;const d=dayOf(b);if(d===null)continue;
+    for(const b of P.bills||[]){if(!(!b.phase||b.phase==="both"||b.phase===phase)||billAcct(b)!=="chase")continue;const d=dayOf(b);if(d===null)continue;
       const due=dueIn(y,m,d),key=b.name+"|"+ds(due).slice(0,7);if(due<end&&!paid.has(key)&&due>=today-31){const am=billAmt(b,key);sum+=am;items.push({name:b.name,due,amt:am})}}}
   return {sum:Math.round(sum*100)/100,items:items.sort((a,b)=>a.due-b.due)};
 }
@@ -848,9 +849,9 @@ function payPlanner(P,c,perCheck,spend,gNet,post){
   const routes=P.routing||[],routed=perCheck+spend+routes.reduce((s,r)=>s+(+r.amt||0),0),left=net-routed;
   const last=[...(P.income||[])].filter(x=>x.src==="mine").sort((a,b)=>b.date<a.date?-1:1)[0];
   return `<div class="card"><h2>Paycheck planner</h2>
-    <div class="seg" role="group" aria-label="Before or after closing">
+    ${closingOn()?`<div class="seg" role="group" aria-label="Before or after closing">
       <button type="button" data-act="phase" data-v="pre" aria-pressed="${!post}">Before closing</button>
-      <button type="button" data-act="phase" data-v="post" aria-pressed="${post}">After closing</button></div>
+      <button type="button" data-act="phase" data-v="post" aria-pressed="${post}">After closing</button></div>`:""}
     <div class="row" style="margin-top:10px">
       <label class="f">Hourly rate<input data-plan="pay.rate" inputmode="decimal" value="${esc(pay.rate??"")}"></label>
       <label class="f">OT hours this check<input data-plan="pay.otHours" inputmode="decimal" value="${esc(ot)}"></label></div>
@@ -895,7 +896,7 @@ function budgetsDetail(){
 }
 
 /* ---------- Bills tab: this month + manage bills ---------- */
-function billSummary(b){const d=dayOf(b);return [autopayOn(b)?"Autopay":"You pay it",d?`due the ${ordinal(d)}`:"no set due date",`from ${billAcct(b)==="usaa"?L().save:L().bills}`,b.phase==="pre"?"until closing":b.phase==="post"?"after closing":""].filter(Boolean).join(" · ")}
+function billSummary(b){const d=dayOf(b);return [autopayOn(b)?"Autopay":"You pay it",d?`due the ${ordinal(d)}`:"no set due date",`from ${billAcct(b)==="usaa"?L().save:L().bills}`,closingOn()&&b.phase==="pre"?"until closing":closingOn()&&b.phase==="post"?"after closing":""].filter(Boolean).join(" · ")}
 function billHint(va,ap,hasDay){
   if(ap&&!hasDay)return "Autopay needs a due date.";
   if(ap)return va?"Marks itself paid on the due date using your estimate. Enter the real amount before the month ends; you'll get a reminder 2 days before.":"Marks itself paid on the due date and takes it out of the account.";
@@ -912,7 +913,7 @@ function billForm(b,i){
     <div class="f">Autopay?<div class="seg" data-grp="auto"><button type="button" data-act="blseg" data-v="1" aria-pressed="${ap}">Yes, it autopays</button><button type="button" data-act="blseg" data-v="0" aria-pressed="${!ap}">No, I pay it</button></div></div>
     <label class="f">Due day (1–31)<input id="bl-day" inputmode="numeric" value="${dayOf(b)??""}" placeholder="Leave blank if there's no set date"></label>
     <div class="row"><label class="f">Paid from<select id="bl-from"><option value="bills" ${b.from!=="savings"?"selected":""}>${esc(lb.bills)}</option><option value="savings" ${b.from==="savings"?"selected":""}>${esc(lb.save)}</option></select></label>
-      <label class="f">When<select id="bl-phase"><option value="both" ${!b.phase||b.phase==="both"?"selected":""}>Always</option><option value="pre" ${b.phase==="pre"?"selected":""}>Until closing</option><option value="post" ${b.phase==="post"?"selected":""}>After closing</option></select></label></div>
+      ${closingOn()?`<label class="f">When<select id="bl-phase"><option value="both" ${!b.phase||b.phase==="both"?"selected":""}>Always</option><option value="pre" ${b.phase==="pre"?"selected":""}>Until closing</option><option value="post" ${b.phase==="post"?"selected":""}>After closing</option></select></label>`:""}</div>
     <div class="small muted" id="bl-hint">${billHint(va,ap,!!dayOf(b))}</div>
     <div class="row"><button class="btn" type="submit">Save</button><button class="btn ghost" type="button" data-act="billcancel">Cancel</button></div>
     ${i!=="new"?`<button class="x" type="button" data-act="delbill" data-i="${i}" style="color:var(--bad);align-self:flex-start">Delete this bill</button>`:""}
@@ -928,11 +929,25 @@ function manageBills(){
     <div class="small muted" style="margin:4px 0 6px">Tap a bill to change it.</div>
     ${S.billEdit==="new"?billForm({},"new"):""}
     <div class="list">${list.map(({b,i})=>`<div class="bucket">${S.billEdit===i?billForm(b,i):`<button class="bk-head" data-act="billedit" data-i="${i}"><span class="bk-name">${esc(b.name)}</span><span class="num bk-amt">${isVar(b)?"~":""}${m2(b.amt)}</span><span class="bk-note small muted">${isVar(b)?"Varies · ":""}${esc(billSummary(b))}</span></button>`}</div>`).join("")}</div>
-    <div class="kv small" style="margin-top:8px"><span class="muted">Monthly total before closing</span><b>${m2(billTotal("pre"))}</b></div>
-    <div class="kv small"><span class="muted">Monthly total after closing</span><b>${m2(billTotal("post"))}</b></div>
+    ${closingOn()?`<div class="kv small" style="margin-top:8px"><span class="muted">Monthly total before closing</span><b>${m2(billTotal("pre"))}</b></div>
+    <div class="kv small"><span class="muted">Monthly total after closing</span><b>${m2(billTotal("post"))}</b></div>`:`<div class="kv small" style="margin-top:8px"><span class="muted">Monthly total</span><b>${m2(billTotal(P.postClosing?"post":"pre"))}</b></div>`}
   </div>`;
 }
-function billsTab(){if(!S.plan)return planTab();return `<section>${billsCard()}${manageBills()}</section>`}
+function varPayCard(){
+  const rows=billRows().filter(r=>isVar(r.b));if(!rows.length)return "";
+  const pick=rows.find(r=>r.key===S.vpPick)||rows.find(r=>!r.paid||S.plan.varAmt?.[r.key]==null)||rows[0];
+  const info=paidInfo(pick.key),done=pick.paid&&S.plan.varAmt?.[pick.key]!=null;
+  const status=pick.paid?(done?`Paid ${m2(info?.amount??billAmt(pick.b,pick.key))}${info?.date?" on "+short(dn(info.date)):""}. Enter a new amount to fix it.`:`Autopaid using the estimate (${m2(info?.amount??pick.b.amt)}). Enter the real amount.`)
+    :`Not paid yet. Usually about ${m2(pick.b.amt)}.`;
+  return `<form class="card" id="vpayf"><h2>Pay a bill that varies</h2>
+    <label class="f">Bill<select id="vp-bill">${rows.map(r=>`<option value="${esc(r.key)}" ${r.key===pick.key?"selected":""}>${esc(r.b.name)}${r.paid&&S.plan.varAmt?.[r.key]!=null?" ✓":""}</option>`).join("")}</select></label>
+    <div class="small muted" style="margin:2px 0 6px">${esc(status)}</div>
+    <div class="row"><label class="f">Amount<input id="vp-amt" inputmode="decimal" placeholder="${esc(pick.b.amt)}" value="${done?esc(info?.amount??""):""}"></label>
+      <label class="f">Date paid<input type="date" id="vp-date" value="${esc(info?.date||todayS())}"></label></div>
+    <button class="btn" type="submit">Save</button></form>`;
+}
+document.addEventListener("change",e=>{if(e.target.id==="vp-bill"){S.vpPick=e.target.value;render()}});
+function billsTab(){if(!S.plan)return planTab();return `<section>${varPayCard()}${billsCard()}${manageBills()}</section>`}
 function renameBillKeys(o,n){const P=S.plan,fx=k=>k.startsWith(o+"|")?n+k.slice(o.length):k;
   P.paid=(P.paid||[]).map(fx);P.skipAuto=(P.skipAuto||[]).map(fx);(P.paidLog||[]).forEach(x=>x.key=fx(x.key));
   for(const obj of [P.varAmt,P.snooze])if(obj)for(const k of Object.keys(obj)){const nk=fx(k);if(nk!==k){obj[nk]=obj[k];delete obj[k]}}}
@@ -1012,6 +1027,16 @@ async function setPeriod(kind){
   toast(kind===oldKind?"Kept as is":`Switches to ${PERIOD[kind].label.toLowerCase()} on ${pretty(nr)}`);
 }
 
+function confirmTap(b,msg){if(b.dataset.armed==="1")return true;b.dataset.armed="1";b.textContent=msg;setTimeout(()=>{if(b.isConnected){b.dataset.armed="";b.textContent="We've closed"}},5000);return false}
+function closingCard(){
+  const P=S.plan,on=closingOn(),pre=(P.bills||[]).filter(b=>b.phase==="pre"),post=(P.bills||[]).filter(b=>b.phase==="post");
+  if(!on)return `<div class="card"><h2>Buying a house?</h2><div class="small muted">Turn this on if some bills will change after you close (like rent ending and a mortgage starting). You can mark each bill as "until closing" or "after closing" and see both totals.</div>
+    <button class="btn ghost" data-act="closingon" style="margin-top:10px">Turn on closing mode</button></div>`;
+  return `<div class="card"><h2>House closing</h2><div class="small muted">Bills can be set to "until closing" or "after closing." Once you've closed, tap below: bills marked "until closing"${pre.length?` (${esc(pre.map(b=>b.name).join(", "))})`:""} are removed, "after closing" bills become regular bills, and this option goes away.</div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
+      <button class="btn" data-act="closed">We've closed</button>
+      ${!pre.length&&!post.length?`<button class="btn ghost" data-act="closingoff">Turn off closing mode</button>`:""}</div></div>`;
+}
 function setupTab(){
   return `<section>
     ${periodCard()}
@@ -1039,6 +1064,7 @@ function setupTab(){
       <div class="small muted" style="margin-top:8px">${S.settings?.partnerFull?`${esc(NAMES.grace)} sees the full app: bills, balances, savings, moving money. What each of you buys on your own card still stays private.`:`${esc(NAMES.grace)} sees only their card, the shared cards and special budgets. You keep bills, balances and savings to yourself.`}</div></div>`:""}
     ${S.owner&&S.joinCode?`<div class="card"><h2>Invite ${esc(NAMES.grace)}</h2><div class="small muted">${esc(NAMES.grace)} creates an account in this app, picks "Join your partner" and types this code.</div>
       <div class="num" style="font-size:28px;font-weight:700;letter-spacing:.12em;margin-top:8px;user-select:all">${esc(S.joinCode)}</div></div>`:""}
+    ${S.owner&&S.plan?closingCard():""}
     <div class="card"><h2>Look</h2><div class="seg" role="group" aria-label="Color mode">
       ${[["light","Light"],["dark","Dark"],["auto","Match phone"]].map(([k,l])=>`<button type="button" data-act="theme" data-v="${k}" aria-pressed="${getTheme()===k}">${l}</button>`).join("")}</div></div>
     <div class="card"><h2>This phone</h2><div class="small muted">Get what's left every night at 7 PM, and the reload amounts the night before it resets.</div>
@@ -1142,6 +1168,12 @@ document.addEventListener("click",async e=>{
     try{await saveSettings(patch);toast(a==="catdel"?`${cat.name} removed`:"Saved")}catch(err){fail(err)}return}
   if(a==="blankplan"){S.plan=JSON.parse(JSON.stringify(BLANK_PLAN));S.plan.payAnchor=anchor();render();savePlan();return}
   if(a==="rescue"){const amt=+b.dataset.amt;await addMove(b.dataset.from,b.dataset.to,amt,"Cover overspending");return}
+  if(a==="closingon"){S.plan.closingMode=true;render();savePlan();toast("Closing mode is on. Set each bill's \"When\" in the Bills tab.");return}
+  if(a==="closingoff"){S.plan.closingMode=false;S.plan.postClosing=false;render();savePlan();return}
+  if(a==="closed"){const P=S.plan,gone=(P.bills||[]).filter(x=>x.phase==="pre").map(x=>x.name);
+    if(!confirmTap(b,gone.length?`Tap again to remove ${gone.join(", ")}`:"Tap again to confirm"))return;
+    P.bills=(P.bills||[]).filter(x=>x.phase!=="pre").map(x=>({...x,phase:"both"}));P.closingMode=false;P.postClosing=false;P.closedOn=todayS();
+    render();savePlan();toast("Congrats on the house! After-closing bills are now your regular bills.");return}
   if(a==="phase"){S.plan.postClosing=b.dataset.v==="post";render();savePlan();return}
   if(a==="gdone"){const g=S.plan.goals[+b.dataset.i];g.done=b.checked;render();savePlan();return}
   if(a==="gadd"){const i=+b.dataset.i;const v=num(document.getElementById("gadd-"+i).value);if(!isFinite(v)){toast("Enter an amount first");return}
@@ -1201,6 +1233,13 @@ document.addEventListener("submit",async e=>{
     S.plan.varAmt={...(S.plan.varAmt||{}),[k]:v};const cutoff=ds(dn(todayS())-100).slice(0,7);
     for(const x of Object.keys(S.plan.varAmt))if((x.split("|")[1]||"")<cutoff)delete S.plan.varAmt[x];
     S.varOpen=null;render();savePlan();toast("Saved")}
+  if(f.id==="vpayf"){const k=val("vp-bill"),amt=num(val("vp-amt"));if(!(amt>=0)){toast("Enter the amount");return}
+    const bill=(S.plan.bills||[]).find(x=>k.startsWith(x.name+"|"));if(!bill)return;const acct=billAcct(bill);
+    const info=(S.plan.paidLog||[]).find(x=>x.key===k),date=val("vp-date")||todayS();
+    if(info){if(info.acct)acctAdjust(info.acct,-(amt-(+info.amount||0)));info.amount=amt;info.date=date}
+    else{acctAdjust(acct,-amt);S.plan.paidLog=(S.plan.paidLog||[]).concat([{key:k,amount:amt,date,acct}])}
+    S.plan.paid=[...new Set([...(S.plan.paid||[]),k])];S.plan.varAmt={...(S.plan.varAmt||{}),[k]:amt};
+    S.vpPick=null;render();savePlan();toast(`${bill.name}: ${m2(amt)} saved`)}
   if(f.id==="payf"){const k=f.dataset.key,amt=num(val("pf-amt"));if(!(amt>=0)){toast("Enter the amount paid");return}
     const bill=(S.plan.bills||[]).find(x=>k.startsWith(x.name+"|")),acct=bill?billAcct(bill):"chase";acctAdjust(acct,-amt);
     if(bill&&isVar(bill))S.plan.varAmt={...(S.plan.varAmt||{}),[k]:amt};
@@ -1234,14 +1273,14 @@ document.addEventListener("submit",async e=>{
     if(ds_&&!(d>=1&&d<=31)){toast("Due day has to be 1 to 31");return}
     if(ap&&!ds_){toast("Autopay needs a due date");return}
     if(S.plan.bills.some((x,j)=>x.name.toLowerCase()===name.toLowerCase()&&String(j)!==String(i))){toast("You already have a bill with that name");return}
-    const fields={name,amt:isFinite(amt)?amt:0,variable:va,auto:ap,day:ds_?String(d):"",from:val("bl-from"),acct:val("bl-from")==="savings"?L().save:L().bills,phase:val("bl-phase")};
+    const fields={name,amt:isFinite(amt)?amt:0,variable:va,auto:ap,day:ds_?String(d):"",from:val("bl-from"),acct:val("bl-from")==="savings"?L().save:L().bills,phase:document.getElementById("bl-phase")?val("bl-phase"):(i==="new"?"both":S.plan.bills[+i].phase||"both")};
     if(i==="new")S.plan.bills.push({...fields,added:todayS()});
     else{const b=S.plan.bills[+i];if(b.name!==name)renameBillKeys(b.name,name);Object.assign(b,fields)}
     S.billEdit=null;render();savePlan();toast(i==="new"?`Added ${name}`:"Saved")}
   if(f.id==="billf"){
     const name=val("bf-name").trim(),amt=num(val("bf-amt"));
     if(!name||!isFinite(amt)){toast("Add a name and amount");return}
-    S.plan.bills.push({name,amt,day:val("bf-day").trim(),acct:L().bills,phase:val("bf-phase"),from:"bills",added:todayS()});
+    S.plan.bills.push({name,amt,day:val("bf-day").trim(),acct:L().bills,phase:document.getElementById("bf-phase")?val("bf-phase"):"both",from:"bills",added:todayS()});
     render();savePlan();toast(`Added ${name}`);
   }
   if(f.id==="goalf"){const name=val("gf-name").trim(),amt=num(val("gf-amt"));if(!name){toast("Add a name");return}
@@ -1413,7 +1452,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202609300848";
+const BUILD="202609300900";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
@@ -1495,6 +1534,9 @@ document.addEventListener("click",async e=>{
 
 /* ---------- notifications ---------- */
 function b64(s){const p="=".repeat((4-s.length%4)%4);const r=atob((s+p).replace(/-/g,"+").replace(/_/g,"/"));return Uint8Array.from([...r].map(c=>c.charCodeAt(0)))}
+function myTZ(){try{return Intl.DateTimeFormat().resolvedOptions().timeZone||"America/New_York"}catch{return "America/New_York"}}
+async function syncTZ(){try{if(!("serviceWorker" in navigator))return;const reg=await navigator.serviceWorker.getRegistration();const sub=await reg?.pushManager?.getSubscription();
+  if(sub)await sb.from("push_subscriptions").update({tz:myTZ()}).eq("endpoint",sub.endpoint).neq("tz",myTZ())}catch{}}
 async function enablePush(btn){
   const ios=/iphone|ipad/i.test(navigator.userAgent),standalone=window.navigator.standalone||matchMedia("(display-mode: standalone)").matches;
   if(ios&&!standalone){toast("First add this app to your Home Screen: Share → Add to Home Screen. Then open it from there.");return}
@@ -1504,7 +1546,7 @@ async function enablePush(btn){
     const reg=await navigator.serviceWorker.register("sw.js");await navigator.serviceWorker.ready;
     const sub=(await reg.pushManager.getSubscription())||await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:b64(VAPID)});
     const j=sub.toJSON();
-    chk(await sb.from("push_subscriptions").upsert({user_id:ME,endpoint:j.endpoint,p256dh:j.keys.p256dh,auth_key:j.keys.auth,updated_at:new Date().toISOString()},{onConflict:"endpoint"}));
+    chk(await sb.from("push_subscriptions").upsert({user_id:ME,endpoint:j.endpoint,p256dh:j.keys.p256dh,auth_key:j.keys.auth,tz:myTZ(),updated_at:new Date().toISOString()},{onConflict:"endpoint"}));
     toast("You'll get your numbers every night at 7 PM");if(btn)btn.textContent="Notifications are on";
   }catch(err){console.error(err);toast("Couldn't turn on notifications. Try again.")}
 }
@@ -1522,7 +1564,7 @@ async function start(){
   S.owner=hh?.created_by===ME;
   try{await LOAD.settings();await Promise.all(Object.entries(LOAD).filter(([k])=>k!=="settings").map(([,f])=>f()))}catch(err){fail(err)}
   S.full=S.owner||!!S.settings?.partnerFull;S.view=S.full?"aspen":"grace";S.aPool=S.owner?"aspen":"grace";
-  S.ready=true;render();runAutopay();
+  S.ready=true;render();runAutopay();syncTZ();
   if(channel)sb.removeChannel(channel);
   channel=sb.channel("wb-"+HID);
   for(const [t,k] of [["wb_settings","settings"],["wb_txns","txns"],["wb_txn_notes","txns"],["wb_moves","moves"],["wb_events","events"],["wb_plan","plan"]]){
