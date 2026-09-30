@@ -658,7 +658,7 @@ function billRowHtml(r,today){
 }
 
 /* ---------- income: paychecks and extra money ---------- */
-function incomeSources(){return [["mine",`${NAMES.aspen}'s paycheck`],["partner",`${NAMES.grace}'s pay`],["drill","Drill pay"],["ot","Overtime / bonus"],["reimb","Reimbursement"],["other","Other"]]}
+function incomeSources(){return [["mine",`${NAMES.aspen}'s paycheck`],["partner",`${NAMES.grace}'s pay`],...(S.plan?.incomeTypes||[]).map(t=>[t.k,t.name]),["ot","Overtime / bonus"],["reimb","Reimbursement"],["other","Other"]]}
 /* ---------- how a paycheck or extra money splits ---------- */
 function chaseDueUntil(end){
   const P=S.plan,phase=P.postClosing?"post":"pre",paid=new Set(P.paid||[]),today=dn(todayS());let sum=0;const items=[];
@@ -762,6 +762,10 @@ function depositCard(){
     ${r.home!=="chase"?`<label class="check small"><input type="checkbox" data-dep="cover" ${r.cover?"checked":""}> Move what ${esc(lb.bills)} needs for upcoming bills</label>`:""}
     <label class="check small"><input type="checkbox" data-dep="spend" ${r.spend?"checked":""}> Take out the spending refill for the cards</label>
     <div class="small muted" style="margin-top:6px">Example with $1,000: ${esc(depositSummary(1000,src))}</div>
+    <details style="margin-top:10px"><summary class="small"><b>Your own types of income</b></summary>
+      ${(S.plan.incomeTypes||[]).map(t=>`<div class="item"><div class="grow">${esc(t.name)}</div><button class="x" data-act="inctdel" data-k="${esc(t.k)}">Remove</button></div>`).join("")}
+      <form class="form" id="inctf" style="margin-top:6px"><div class="row"><label class="f">Name<input id="it-name" placeholder="Side job, drill pay, child support" autocomplete="off"></label></div>
+      <button class="btn ghost sm" type="submit">Add type of income</button></form></details>
   </div>`;
 }
 function depositSummary(amt,src){const d=depositPlan(amt,src);const parts=Object.entries(d.out).filter(([,v])=>v>0).map(([k,v])=>`${m0(v)} to ${acctName(k)}`);if(d.spend)parts.push(`${m0(d.spend)} spending refill`);return parts.join(", ")||"nothing"}
@@ -1080,7 +1084,8 @@ async function setPeriod(kind){
 function confirmTap(b,msg){if(b.dataset.armed==="1")return true;b.dataset.armed="1";b.textContent=msg;setTimeout(()=>{if(b.isConnected){b.dataset.armed="";b.textContent="We've closed"}},5000);return false}
 function closingCard(){
   const P=S.plan,on=closingOn(),pre=(P.bills||[]).filter(b=>b.phase==="pre"),post=(P.bills||[]).filter(b=>b.phase==="post");
-  if(!on)return `<div class="card"><h2>Buying a house?</h2><div class="small muted">Turn this on if some bills will change after you close (like rent ending and a mortgage starting). You can mark each bill as "until closing" or "after closing" and see both totals.</div>
+  if(!on)return "";
+  return `<div class="card"><h2>Buying a house?</h2><div class="small muted">Turn this on if some bills will change after you close (like rent ending and a mortgage starting). You can mark each bill as "until closing" or "after closing" and see both totals.</div>
     <button class="btn ghost" data-act="closingon" style="margin-top:10px">Turn on closing mode</button></div>`;
   return `<div class="card"><h2>House closing</h2><div class="small muted">Bills can be set to "until closing" or "after closing." Once you've closed, tap below: bills marked "until closing"${pre.length?` (${esc(pre.map(b=>b.name).join(", "))})`:""} are removed, "after closing" bills become regular bills, and this option goes away.</div>
     <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
@@ -1153,6 +1158,7 @@ document.addEventListener("click",async e=>{
     if(a==="gsgo"){S.tab=b.dataset.t;window.scrollTo(0,0)}render();return}
   if(a==="hpref"){const g=b.dataset.g,k=b.dataset.k,on=b.dataset.v==="1";S.prefs=S.prefs||{};const h=S.prefs.home=S.prefs.home||{};
     const set=new Set(h[g]||[]);on?set.delete(k):set.add(k);h[g]=[...set];render();savePrefs();return}
+  if(a==="inctdel"){if(!arm(b,"Tap again to remove"))return;S.plan.incomeTypes=(S.plan.incomeTypes||[]).filter(t=>t.k!==b.dataset.k);if(S.depSrc===b.dataset.k)S.depSrc="mine";render();savePlan();return}
   if(a==="depadd"){const r=depRuleSet(S.depSrc||"mine");r.splits=[...(r.splits||[]),{to:acctList().find(x=>x.k!==r.home)?.k||"usaa",amt:0}];render();savePlan();return}
   if(a==="depdel"){const r=depRuleSet(S.depSrc||"mine");r.splits.splice(+b.dataset.i,1);render();savePlan();return}
   if(a==="pshow"){const k=b.dataset.k,on=b.dataset.v==="1";
@@ -1271,6 +1277,8 @@ const val=id=>document.getElementById(id)?.value??"";
 let logBusy=false;
 document.addEventListener("submit",async e=>{
   e.preventDefault();const f=e.target;
+  if(f.id==="inctf"){const name=val("it-name").trim().slice(0,40);if(!name){toast("Name it");return}
+    S.plan.incomeTypes=[...(S.plan.incomeTypes||[]),{k:"t"+Date.now().toString(36),name}];render();savePlan();toast(`${name} added`)}
   if(f.id==="evedf"){const name=val("ee-name").trim().slice(0,60),amt=num(val("ee-amt"));
     if(!name||!(amt>=0)){toast("Add a name and an amount");return}
     try{await db.doc("events/"+f.dataset.id).update({name,budget:amt});S.evEdit=null;render();toast("Saved")}catch(err){fail(err)}}
@@ -1560,7 +1568,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202609301318";
+const BUILD="202609301319";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
