@@ -64,14 +64,15 @@ function summarize(settings: any, txns: any[], moves: any[], events: any[], toda
   for (const x of txns) { const r = R[x.pool]; if (!r) continue; const amt = +x.amount;
     if (x.src === "cushion") r.cush -= amt; else { const k = wk(x.date); r.spent[k] = (r.spent[k] || 0) + amt; } }
   const ap = (ep: string, amt: number, k: number) => { const [kind, p] = ep.split(":"); if (!R[p]) return;
-    if (kind === "week") R[p].adj[k] = (R[p].adj[k] || 0) + amt; else if (kind === "cushion") R[p].cush += amt; };
+    if (kind === "week") R[p].adj[k] = (R[p].adj[k] || 0) + amt; else if (kind === "cushion") R[p].cush += amt;
+    else if (kind === "next") { const nx = step(k); R[p].adj[nx] = (R[p].adj[nx] || 0) + amt; } };
   for (const m of moves) { const k = wk(m.date); ap(m.from_ep, -m.amount, k); ap(m.to_ep, +m.amount, k); }
   // deno-lint-ignore no-explicit-any
   const out: Record<string, any> = {};
   for (const p of pools) { const r = R[p]; let c = r.cush;
     for (const x of L) if (x < cw) c += budgetFor(p, x) + (r.adj[x] || 0) - (r.spent[x] || 0);
     const alloc = budgetFor(p, cw) + (r.adj[cw] || 0), spent = r.spent[cw] || 0;
-    out[p] = { left: alloc - spent, cushion: c, nextBudget: budgetFor(p, next), alloc, spent }; }
+    out[p] = { left: alloc - spent, cushion: c, nextBudget: budgetFor(p, next) + (r.adj[next] || 0), alloc, spent }; }
   const names = { household: "Household", aspen: "Me", grace: "Partner", extras: "Extras", ...(settings.names || {}) };
   for (const c of customs) names[c.id] = c.name;
   const ev = events.filter((e) => e.active).map((e) => {

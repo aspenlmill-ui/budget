@@ -224,14 +224,16 @@ function compute(){
   POOLS.forEach(p=>R[p]={adj:{},spent:{},cush:0});
   for(const t of S.txns){const r=R[t.pool];if(!r)continue;
     if(t.from==="cushion")r.cush-=t.amount;else{const w=wk(t.date);r.spent[w]=(r.spent[w]||0)+t.amount}}
+  const fs=forcedStarts();
   const ap=(ep,amt,w)=>{const [k,p]=String(ep).split(":");if(!R[p])return;
-    if(k==="week")R[p].adj[w]=(R[p].adj[w]||0)+amt;else if(k==="cushion")R[p].cush+=amt};
+    if(k==="week")R[p].adj[w]=(R[p].adj[w]||0)+amt;else if(k==="cushion")R[p].cush+=amt;
+    else if(k==="next"){const nx=stepFrom(w,fs);R[p].adj[nx]=(R[p].adj[nx]||0)+amt}};
   for(const m of S.moves){const w=wk(m.date);ap(m.from,-m.amount,w);ap(m.to,m.amount,w)}
   const out={cw};const L=weekStarts();
   for(const p of POOLS){const r=R[p];let c=r.cush;
     for(const w of L){if(w<cw)c+=budgetFor(p,w)+(r.adj[w]||0)-(r.spent[w]||0)}
     const budget=budgetFor(p,cw),alloc=budget+(r.adj[cw]||0),spent=r.spent[cw]||0;
-    out[p]={budget,alloc,spent,left:alloc-spent,cushion:c}}
+    out[p]={budget,alloc,spent,left:alloc-spent,cushion:c,nextAdj:r.adj[stepFrom(cw,fs)]||0}}
   return out;
 }
 
@@ -373,7 +375,8 @@ function aspenView(){
 function rescueOptions(c,p){
   const need=Math.round(-c[p].left*100)/100,opts=[];
   const add=(ep,label,avail,why,tier)=>{if(avail>0.004)opts.push({ep,label,amt:Math.round(Math.min(need,avail)*100)/100,full:avail>=need-0.004,why,tier})};
-  const f=weekFrac(c);
+  const f=weekFrac(c),nb=budgetFor(p,nextReset())+(c[p].nextAdj||0);
+  add(`next:${p}`,`${NAMES[p]} next ${PER().noun}`,nb,`Next ${PER().noun} ${NAMES[p]} gets less, so it evens out.`,0);
   add(`cushion:${p}`,`${NAMES[p]}'s splurge`,c[p].cushion,"Your own saved leftovers. Nothing else changes.",1);
   if(p!=="extras"){add("week:extras",`${NAMES.extras} ${PER().this}`,c.extras.left,"That's what Extras is for.",2);add("cushion:extras",`${NAMES.extras} splurge`,c.extras.cushion,"Saved odds-and-ends money.",2)}
   for(const q of POOLS)if(q!==p&&q!=="extras")add(`cushion:${q}`,`${NAMES[q]}'s splurge`,c[q].cushion,`Uses ${NAMES[q]}'s saved leftovers.`,3);
@@ -503,7 +506,7 @@ function weekTab(){
   </section>`;
 }
 
-function epLabel(ep){if(ep==="usaa")return (S.plan?L().save:"Savings")+" savings";if(ep.startsWith("event:"))return poolName(ep)+" (special)";const [k,p]=ep.split(":");return `${NAMES[p]} ${k==="week"?PER().this:"cushion"}`}
+function epLabel(ep){if(ep.startsWith("next:"))return `${NAMES[ep.slice(5)]} next ${PER().noun}`;if(ep==="usaa")return (S.plan?L().save:"Savings")+" savings";if(ep.startsWith("event:"))return poolName(ep)+" (special)";const [k,p]=ep.split(":");return `${NAMES[p]} ${k==="week"?PER().this:"cushion"}`}
 function epAvail(ep,c){if(ep==="usaa")return null;if(ep.startsWith("event:")){const e=S.events.find(x=>"event:"+x.id===ep);return e?evStats(e).left:0}const [k,p]=ep.split(":");return k==="week"?c[p].left:c[p].cushion}
 function eps(){const e=[];for(const p of POOLS){e.push(`week:${p}`,`cushion:${p}`)}for(const v of activeEvents())e.push("event:"+v.id);e.push("usaa");return e}
 
@@ -564,7 +567,8 @@ function billsCard(){
   const t=new Date(),y=t.getFullYear(),m=t.getMonth();
   /* due before payday: this month's unpaid ones before payday, plus next month's early ones if payday crosses the month */
   const beforePay=dueBeforePayday("chase"),fromSav=dueBeforePayday("usaa");
-  const total=rows.reduce((s,r)=>s+(+r.b.amt||0),0),paidAmt=rows.filter(r=>r.paid).reduce((s,r)=>s+(paidInfo(r.key)?.amount??(+r.b.amt||0)),0);
+  const total=rows.reduce((s,r)=>s+billAmt(r.b,r.key),0),paidAmt=rows.filter(r=>r.paid).reduce((s,r)=>s+(paidInfo(r.key)?.amount??billAmt(r.b,r.key)),0);
+  const needAmt=rows.filter(r=>isVar(r.b)&&!r.paid&&S.plan?.varAmt?.[r.key]==null);
   const chase=+P.accounts?.chase||0,cover=chase-beforePay;
   const month=t.toLocaleDateString("en-US",{month:"long"});
   return `<div class="card"><h2>${esc(month)} bills</h2>
@@ -576,15 +580,17 @@ function billsCard(){
     ${fromSav>0?`<div class="small muted" style="margin-top:6px">Also coming out of ${esc(lb.save)} before payday: ${m2(fromSav)}</div>`:""}
     <div class="bar" style="margin-top:12px"><i style="width:${pct(paidAmt,total)}%"></i></div>
     <div class="muted small" style="margin-top:4px">${m0(paidAmt)} of ${m0(total)} paid this month</div>
+    ${needAmt.length?`<div class="chip warn" style="margin-top:8px">Enter this month's amount: ${needAmt.map(r=>esc(r.b.name)).join(", ")}</div>`:""}
     <div class="list" style="margin-top:6px">${rows.map(r=>billRowHtml(r,today)).join("")}</div>
     <details style="margin-top:8px"><summary class="small"><b>Edit bills</b></summary>
       <div class="tbl" style="margin-top:8px">${(P.bills||[]).map((b,i)=>`<div class="bill">
         <div style="min-width:0"><div>${esc(b.name)}</div><div class="meta">${dayOf(b)?"Due the "+ordinal(dayOf(b)):"No due date"}${b.phase!=="both"?` · ${b.phase==="pre"?"until closing":"after closing"}`:""}</div></div>
-        <input data-plan="bills.${i}.amt" inputmode="decimal" value="${esc(b.amt)}" aria-label="${esc(b.name)} amount">
+        <input data-plan="bills.${i}.amt" inputmode="decimal" value="${esc(b.amt)}" aria-label="${esc(b.name)} ${b.variable?"estimate":"amount"}" title="${b.variable?"Estimate used until you enter the real amount":"Amount"}">
         <button class="x" data-act="delbill" data-i="${i}" aria-label="Remove ${esc(b.name)}">✕</button>
         <div class="meta" style="grid-column:1/-1;display:flex;gap:14px;flex-wrap:wrap;align-items:center">
           <label class="check small">Due day <input data-billday="${i}" inputmode="numeric" value="${dayOf(b)??""}" placeholder="1–31" aria-label="${esc(b.name)} due day" style="width:58px;padding:4px 6px;font-size:14px"></label>
-          <label class="check small"><input type="checkbox" data-act="billauto" data-i="${i}" ${b.auto===false?"":"checked"}> Autopay on due date</label>
+          <label class="check small"><input type="checkbox" data-act="billvar" data-i="${i}" ${b.variable?"checked":""}> Changes every month</label>
+          ${b.variable?"":`<label class="check small"><input type="checkbox" data-act="billauto" data-i="${i}" ${b.auto===false?"":"checked"}> Autopay on due date</label>`}
           <label class="check small">From <select data-act="billfrom" data-i="${i}" style="width:auto;padding:4px 6px;font-size:13px"><option value="bills" ${b.from!=="savings"?"selected":""}>${esc(L().bills)}</option><option value="savings" ${b.from==="savings"?"selected":""}>${esc(L().save)}</option></select></label></div></div>`).join("")}</div>
       <form class="form" id="billf" style="margin-top:10px">
         <div class="row"><label class="f">New bill<input id="bf-name" placeholder="Electric"></label>
@@ -601,21 +607,29 @@ function billsCard(){
 
 
 /* ---------- bills: mark paid with amount + date ---------- */
+function billAmt(b,key){const v=S.plan?.varAmt?.[key];return v!=null?+v:(+b.amt||0)}
+function isVar(b){return !!b.variable}
 function paidInfo(key){return (S.plan?.paidLog||[]).find(x=>x.key===key)}
 function billRowHtml(r,today){
   const info=paidInfo(r.key);
   if(S.payOpen===r.key)return `<form class="item payform" id="payf" data-key="${esc(r.key)}" style="flex-wrap:wrap">
     <div class="grow" style="flex-basis:100%"><b>${esc(r.b.name)}</b></div>
-    <label class="f" style="flex:1;min-width:110px">Amount paid<input id="pf-amt" inputmode="decimal" value="${esc(r.b.amt)}"></label>
+    <label class="f" style="flex:1;min-width:110px">Amount paid<input id="pf-amt" inputmode="decimal" value="${esc(billAmt(r.b,r.key))}"></label>
     <label class="f" style="flex:1;min-width:130px">Date<input type="date" id="pf-date" value="${todayS()}"></label>
     <div class="row" style="flex-basis:100%"><button class="btn" type="submit">Save as paid</button><button class="btn ghost" type="button" data-act="paycancel">Cancel</button></div></form>`;
-  const when=r.paid?`Paid${info?.date?" "+short(dn(info.date)):""}${info&&Math.abs(info.amount-(+r.b.amt||0))>0.004?` · ${m2(info.amount)}`:""}`
+  const va=isVar(r.b),hasAmt=S.plan?.varAmt?.[r.key]!=null;
+  if(S.varOpen===r.key)return `<form class="item payform" id="varf" data-key="${esc(r.key)}" style="flex-wrap:wrap">
+    <div class="grow" style="flex-basis:100%"><b>${esc(r.b.name)}</b> <span class="small muted">this month's bill</span></div>
+    <label class="f" style="flex:1;min-width:120px">Amount<input id="vf-amt" inputmode="decimal" value="${hasAmt?esc(billAmt(r.b,r.key)):""}" placeholder="${esc(r.b.amt)}"></label>
+    <div class="row" style="flex-basis:100%"><button class="btn" type="submit">Save amount</button><button class="btn ghost" type="button" data-act="varcancel">Cancel</button></div></form>`;
+  const when=r.paid?`Paid${info?.date?" "+short(dn(info.date)):""}${info&&Math.abs(info.amount-billAmt(r.b,r.key))>0.004?` · ${m2(info.amount)}`:""}`
     :r.due===null?"No due date":r.late?`Past due ${short(r.due)}`:r.due===today?"Due today":`Due ${short(r.due)}`;
   return `<div class="item">
     <span class="dot ${r.paid?"ok":r.late?"late":""}" aria-hidden="true"></span>
     <div class="grow"><div style="${r.paid?"color:var(--muted)":""}">${esc(r.b.name)}</div>
       <div class="small ${r.late&&!r.paid?"":"muted"}" style="${r.late&&!r.paid?"color:var(--bad)":""}">${when}</div></div>
-    <b class="num" style="${r.paid?"color:var(--muted)":""}">${m2(r.b.amt)}</b>
+    <div style="text-align:right"><b class="num" style="${r.paid?"color:var(--muted)":""}">${va&&!hasAmt&&!r.paid?"~":""}${m2(r.paid&&info?info.amount:billAmt(r.b,r.key))}</b>
+      ${va&&!r.paid?`<div class="small">${hasAmt?`<button class="x" data-act="varopen" data-key="${esc(r.key)}">Change</button>`:`<button class="x" data-act="varopen" data-key="${esc(r.key)}" style="color:var(--warn)">Enter amount</button>`}</div>`:""}</div>
     ${r.paid?`<button class="x" data-act="billundo" data-key="${esc(r.key)}">Undo</button>`
       :`<button class="btn sm" data-act="payopen" data-key="${esc(r.key)}">Paid</button>`}
   </div>`;
@@ -628,7 +642,7 @@ function chaseDueUntil(end){
   const P=S.plan,phase=P.postClosing?"post":"pre",paid=new Set(P.paid||[]),today=dn(todayS());let sum=0;const items=[];
   const t=new Date();for(let k=0;k<3;k++){const y=t.getFullYear()+Math.floor((t.getMonth()+k)/12),m=(t.getMonth()+k)%12;
     for(const b of P.bills||[]){if(!(b.phase==="both"||b.phase===phase)||billAcct(b)!=="chase")continue;const d=dayOf(b);if(d===null)continue;
-      const due=dueIn(y,m,d),key=b.name+"|"+ds(due).slice(0,7);if(due<end&&!paid.has(key)&&due>=today-31){sum+=+b.amt||0;items.push({name:b.name,due,amt:+b.amt||0})}}}
+      const due=dueIn(y,m,d),key=b.name+"|"+ds(due).slice(0,7);if(due<end&&!paid.has(key)&&due>=today-31){const am=billAmt(b,key);sum+=am;items.push({name:b.name,due,amt:am})}}}
   return {sum:Math.round(sum*100)/100,items:items.sort((a,b)=>a.due-b.due)};
 }
 function incomeSplit(amt,src,dateS){
@@ -776,8 +790,8 @@ function goalEditForm(g,i,n){return `<form class="goal" id="goaledit" data-i="${
 /* ---------- autopay: bills come out on their due date ---------- */
 function dueBeforePayday(acct){
   if(!S.plan)return 0;const rows=billRows().filter(r=>!acct||billAcct(r.b)===acct),pay=nextPayday(),t=new Date(),y=t.getFullYear(),m=t.getMonth();let sum=0;
-  for(const r of rows){const d=dayOf(r.b);if(d===null)continue;if(!r.paid&&r.due<pay)sum+=+r.b.amt||0;
-    const nx=dueIn(m===11?y+1:y,(m+1)%12,d);if(nx<pay&&nx>r.due)sum+=+r.b.amt||0}
+  for(const r of rows){const d=dayOf(r.b);if(d===null)continue;if(!r.paid&&r.due<pay)sum+=billAmt(r.b,r.key);
+    const nx=dueIn(m===11?y+1:y,(m+1)%12,d);if(nx<pay&&nx>r.due)sum+=billAmt(r.b,r.b.name+"|"+ds(nx).slice(0,7))}
   return sum;
 }
 function runAutopay(){
@@ -785,7 +799,7 @@ function runAutopay(){
   if(!P.autoStart){P.autoStart=todayS();savePlan()}
   const start=dn(P.autoStart),skip=new Set(P.skipAuto||[]);let changed=0;const paid=new Set(P.paid||[]);
   for(const r of billRows()){
-    if(r.b.auto===false||r.due===null||r.paid||r.due>today||skip.has(r.key)||paid.has(r.key))continue;
+    if(r.b.auto===false||isVar(r.b)||r.due===null||r.paid||r.due>today||skip.has(r.key)||paid.has(r.key))continue;
     if(r.due<Math.max(start,r.b.added?dn(r.b.added):start))continue;
     const amt=+r.b.amt||0;paid.add(r.key);
     P.paidLog=(P.paidLog||[]).filter(x=>x.key!==r.key).concat([{key:r.key,amount:amt,date:ds(r.due),auto:true,acct:billAcct(r.b)}]);
@@ -1032,6 +1046,9 @@ document.addEventListener("click",async e=>{
     if(info&&info.acct)acctAdjust(info.acct,+info.amount||0);
     S.plan.paid=(S.plan.paid||[]).filter(x=>x!==k);S.plan.paidLog=(S.plan.paidLog||[]).filter(x=>x.key!==k);
     S.plan.skipAuto=[...new Set([...(S.plan.skipAuto||[]),k])];render();savePlan();return}
+  if(a==="billvar"){const bl=S.plan.bills[+b.dataset.i];bl.variable=b.checked;render();savePlan();toast(b.checked?`${bl.name}: enter the amount each month`:`${bl.name}: same amount every month`);return}
+  if(a==="varopen"){S.varOpen=b.dataset.key;render();document.getElementById("vf-amt")?.focus();return}
+  if(a==="varcancel"){S.varOpen=null;render();return}
   if(a==="billauto"){const bl=S.plan.bills[+b.dataset.i];bl.auto=b.checked;render();savePlan();return}
   if(a==="splurge"){S.mvFrom=`cushion:${b.dataset.p}`;S.mvTo=`week:${b.dataset.p}`;S.tab="move";render();window.scrollTo(0,0);document.getElementById("mv-amt")?.focus();return}
   if(a==="delacct"){if(!arm(b))return;S.plan.otherAccts.splice(+b.dataset.i,1);render();savePlan();return}
@@ -1119,6 +1136,10 @@ document.addEventListener("submit",async e=>{
     const id="c"+Date.now().toString(36);const c=compute(),from=ds(c.cw),entry={from};for(const p of POOLS)entry[p]=c[p].budget;entry[id]=amt;
     const custom=(S.settings.custom||[]).concat([{id,name,shared:!!document.getElementById("cf-shared")?.checked}]);
     try{await saveSettings({custom,history:(S.settings.history||[]).filter(x=>x.from!==from).concat([entry])});toast(`${name} added`);f.reset()}catch(err){fail(err)}}
+  if(f.id==="varf"){const k=f.dataset.key,v=num(val("vf-amt"));if(!(v>=0)){toast("Enter the amount");return}
+    S.plan.varAmt={...(S.plan.varAmt||{}),[k]:v};const cutoff=ds(dn(todayS())-100).slice(0,7);
+    for(const x of Object.keys(S.plan.varAmt))if((x.split("|")[1]||"")<cutoff)delete S.plan.varAmt[x];
+    S.varOpen=null;render();savePlan();toast("Saved")}
   if(f.id==="payf"){const k=f.dataset.key,amt=num(val("pf-amt"));if(!(amt>=0)){toast("Enter the amount paid");return}
     const bill=(S.plan.bills||[]).find(x=>k.startsWith(x.name+"|")),acct=bill?billAcct(bill):"chase";acctAdjust(acct,-amt);
     S.plan.paid=[...new Set([...(S.plan.paid||[]),k])];S.plan.paidLog=(S.plan.paidLog||[]).filter(x=>x.key!==k).concat([{key:k,amount:amt,date:val("pf-date")||todayS(),acct}]);
@@ -1164,7 +1185,7 @@ function applyNames(){const n=S.settings?.names||{};NAMES.household=n.household|
 /* ---------- Friday reload ---------- */
 function reloadCard(c){
   const n=nextReset();
-  const rows=POOLS.map(p=>{const next=budgetFor(p,n),left=c[p].left;return {p,next,left,top:Math.round((next-left)*100)/100,after:c[p].cushion+left}});
+  const rows=POOLS.map(p=>{const next=budgetFor(p,n)+(c[p].nextAdj||0),left=c[p].left;return {p,next,left,top:Math.round((next-left)*100)/100,after:c[p].cushion+left}});
   const totalTop=rows.reduce((s,r)=>s+r.top,0),totalLeft=rows.reduce((s,r)=>s+r.left,0);
   return `<div class="card"><h2>Reload ${esc(pretty(n))}</h2>
     <div class="small muted">Top each card back up to its full amount. What's still on the card stays there and gets counted as splurge money, so you only add the difference.</div>
@@ -1319,7 +1340,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202609300828";
+const BUILD="202609300833";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
