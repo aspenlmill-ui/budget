@@ -544,14 +544,18 @@ function weekTab(){
   </section>`;
 }
 
-function epLabel(ep){if(ep.startsWith("next:"))return `${NAMES[ep.slice(5)]} next ${PER().noun}`;if(ep==="usaa")return (S.plan?L().save:"Savings")+" savings";if(ep.startsWith("event:"))return poolName(ep)+" (special)";const [k,p]=ep.split(":");return `${NAMES[p]} ${k==="week"?PER().this:"cushion"}`}
-function epAvail(ep,c){if(ep==="usaa")return null;if(ep.startsWith("event:")){const e=S.events.find(x=>"event:"+x.id===ep);return e?evStats(e).left:0}const [k,p]=ep.split(":");return k==="week"?c[p].left:c[p].cushion}
-function eps(){const e=[];for(const p of POOLS){e.push(`week:${p}`,`cushion:${p}`)}for(const v of activeEvents())e.push("event:"+v.id);e.push("usaa");return e}
+function epLabel(ep){if(ep.startsWith("next:"))return `${NAMES[ep.slice(5)]} next ${PER().noun}`;if(ep==="usaa")return (S.plan?L().save:"Savings")+" (not in a bucket)";if(ep.startsWith("goal:"))return ep.slice(5);if(ep.startsWith("event:"))return poolName(ep);const [k,p]=ep.split(":");return `${NAMES[p]} ${k==="week"?PER().this:"splurge"}`}
+function goalByEp(ep){return String(ep).startsWith("goal:")?(S.plan?.goals||[]).find(g=>g.name===ep.slice(5)):null}
+function goalBump(ep,delta){const g=goalByEp(ep);if(g){g.saved=Math.round(((+g.saved||0)+delta)*100)/100;return true}return false}
+function epAvail(ep,c){if(ep==="usaa")return null;if(ep.startsWith("goal:"))return +(goalByEp(ep)?.saved||0);if(ep.startsWith("event:")){const e=S.events.find(x=>"event:"+x.id===ep);return e?evStats(e).left:0}const [k,p]=ep.split(":");return k==="week"?c[p].left:c[p].cushion}
+function epGroups(){const g=[["Spending cards",POOLS.map(p=>`week:${p}`)],["Splurge money",POOLS.map(p=>`cushion:${p}`)],["Special budgets",activeEvents().map(v=>"event:"+v.id)]];
+  if(S.plan)g.push(["Savings buckets",(S.plan.goals||[]).filter(x=>!x.done&&x.name).map(x=>"goal:"+x.name)],["Savings account",["usaa"]]);else g.push(["Savings",["usaa"]]);return g.filter(x=>x[1].length)}
+function eps(){return epGroups().flatMap(x=>x[1])}
 
 function moveTab(){
   const c=compute();
   const hist=[...S.moves].sort((a,b)=>b.ts-a.ts).slice(0,40);
-  const opt=(sel)=>eps().map(e=>`<option value="${e}" ${e===sel?"selected":""}>${esc(epLabel(e))}${epAvail(e,c)!==null?` (${m2(epAvail(e,c))})`:""}</option>`).join("");
+  const opt=(sel)=>epGroups().map(([gl,list])=>`<optgroup label="${esc(gl)}">${list.map(e=>`<option value="${esc(e)}" ${e===sel?"selected":""}>${esc(epLabel(e))}${epAvail(e,c)!==null?` (${m2(epAvail(e,c))})`:""}</option>`).join("")}</optgroup>`).join("");
   return `<section>
     ${rescueBanner(c)}
     ${scenarioCard()}
@@ -564,10 +568,10 @@ function moveTab(){
         <label class="f">Reason<input id="mv-why" placeholder="Birthday dinner"></label>
       </div>
       <button class="btn" type="submit">Move money</button>
-      <div class="muted small">"${cap(PER().this)}" changes only the current ${PER().noun}. "Cushion" is the rollover savings for that person. Moving from savings adds money that wasn't in the budget.</div>
+      <div class="muted small">"${cap(PER().this)}" changes only the current ${PER().noun}. "Splurge" is each card's rolled-over leftovers. Moving into a savings bucket adds to that goal; moving out of one takes from it.</div>
     </form>
     <div class="card"><h2>Where things stand</h2>
-      ${POOLS.map(p=>`<div class="kv"><span>${NAMES[p]}</span><span class="small muted">now <b>${m2(c[p].left)}</b> · cushion <b>${m2(c[p].cushion)}</b></span></div>`).join("")}
+      ${POOLS.map(p=>`<div class="kv"><span>${NAMES[p]}</span><span class="small muted">now <b>${m2(c[p].left)}</b> · splurge <b>${m2(c[p].cushion)}</b></span></div>`).join("")}
     </div>
     <div class="card"><h2>Move history</h2>
       ${hist.length?`<div class="list">${hist.map(m=>`<div class="item"><div class="grow">
@@ -1177,7 +1181,7 @@ document.addEventListener("click",async e=>{
     return}
   if(a==="deltx"||a==="delmv"||a==="delbill"||a==="deldebt"){if(!arm(b))return;
     if(a==="deltx")db.doc("txns/"+b.dataset.id).delete().then(()=>toast("Deleted")).catch(fail);
-    if(a==="delmv")db.doc("moves/"+b.dataset.id).delete().then(()=>toast("Move undone")).catch(fail);
+    if(a==="delmv"){const m=S.moves.find(x=>String(x.id)===b.dataset.id);db.doc("moves/"+b.dataset.id).delete().then(()=>{if(m&&(goalBump(m.from,m.amount)|goalBump(m.to,-m.amount))){render();savePlan()}toast("Move undone")}).catch(fail)}
     if(a==="delbill"){S.plan.bills.splice(+b.dataset.i,1);S.billEdit=null;render();savePlan();toast("Bill deleted")}
     if(a==="deldebt"){S.plan.debts.splice(+b.dataset.i,1);render();savePlan()}
     return}
@@ -1271,7 +1275,9 @@ document.addEventListener("change",e=>{
 
 async function addMove(from,to,amount,reason){
   if(from===to){toast("Pick two different places");return}
-  try{await db.collection("moves").add({from,to,amount:Math.round(amount*100)/100,reason:reason||"",date:todayS(),ts:Date.now()});toast(`Moved ${m2(amount)}`)}catch(err){fail(err)}
+  const g=goalByEp(from);if(g&&amount>(+g.saved||0)+0.004){toast(`${g.name} only has ${m2(+g.saved||0)}`);return}
+  try{await db.collection("moves").add({from,to,amount:Math.round(amount*100)/100,reason:reason||"",date:todayS(),ts:Date.now()});
+    if(goalBump(from,-amount)|goalBump(to,amount)){render();savePlan()}toast(`Moved ${m2(amount)}`)}catch(err){fail(err)}
 }
 const val=id=>document.getElementById(id)?.value??"";
 
@@ -1570,7 +1576,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202609301325";
+const BUILD="202609301354";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
