@@ -111,6 +111,9 @@ input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid 
 .gs-n{width:22px;height:22px;border-radius:50%;border:1.5px solid var(--line);display:grid;place-items:center;font-size:12px;flex-shrink:0}
 .gs li.ok .gs-n{background:var(--good);border-color:var(--good);color:#fff}.gs li.ok b{color:var(--muted);text-decoration:line-through}
 .receipt-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.receipt-row label.btn{cursor:pointer}
+.rq{display:flex;flex-direction:column;gap:2px;margin-top:4px}
+.rq-item{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line)}.rq-item:first-child{border-top:0}
+.rq-item .rthumb{cursor:zoom-in}.rq-fix{display:flex;gap:6px;margin-top:4px}.rq-fix input{max-width:110px;padding:6px 8px;font-size:15px}
 .rthumb{width:44px;height:44px;object-fit:cover;border-radius:8px;border:1px solid var(--line)}
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:calc(16px + env(safe-area-inset-top,0px)) 16px calc(16px + env(safe-area-inset-bottom,0px))}
 .overlay img{max-width:100%;max-height:80vh;border-radius:10px}
@@ -228,7 +231,10 @@ function render(){
   if(!db){app.innerHTML=`<header><div><div class="label">Weekly budget</div><h1>Weekly money</h1></div></header><div class="empty">This budget syncs through Claude. Open it from the Claude app or claude.ai while signed in to see and log spending.</div>`;return}
   if(!S.settingsLoaded){return}
   if(!S.settings){app.innerHTML=S.owner?firstRun():`<header><div><div class="label">Weekly budget</div><h1>Almost ready</h1></div></header><div class="empty">This budget hasn't been set up yet. Once the owner sets it up, your weekly number shows here.</div>`;return}
+  const keep={a:document.getElementById("lf-amt")?.value,n:document.getElementById("lf-note")?.value};
   app.innerHTML=S.view==="aspen"?aspenView():graceView();
+  if(keep.a&&document.getElementById("lf-amt"))document.getElementById("lf-amt").value=keep.a;
+  if(keep.n&&document.getElementById("lf-note"))document.getElementById("lf-note").value=keep.n;
 }
 
 function weekLine(c){const n=nextReset();return `Week of ${short(c.cw)} · refills ${pretty(n)}`}
@@ -318,10 +324,13 @@ function logForm(pool,grace){
     ${!grace&&pool!=="household"&&!isEv?`<label class="check"><input type="checkbox" id="lf-cush"> Pay from cushion (a splurge)</label>`:""}
     ${grace?"":`<label class="f">Date<input type="date" id="lf-date" value="${todayS()}"></label>`}
     <div class="receipt-row">
-      <label class="btn ghost sm" for="lf-photo">${S.receipt?"Retake receipt":"Snap a receipt"}</label>
-      <input type="file" id="lf-photo" accept="image/*" capture="environment" hidden>
-      ${S.receipt?`<img src="${S.receipt.url}" alt="Receipt" class="rthumb"><span class="small muted">${esc(S.receipt.status||"")}</span><button type="button" class="x" data-act="rclear">Remove</button>`:`<span class="small muted">Optional. Reads the total for you.</span>`}
+      <label class="btn sm" for="lf-cam">Snap receipt</label>
+      <input type="file" id="lf-cam" accept="image/*" capture="environment" hidden>
+      <label class="btn ghost sm" for="lf-multi">Add several</label>
+      <input type="file" id="lf-multi" accept="image/*" multiple hidden>
+      <span class="small muted">Takes it out of ${esc(poolName(pool))} automatically.</span>
     </div>
+    ${receiptQueue()}
     <button class="btn" type="submit">Log it</button>
   </form>`;
 }
@@ -857,7 +866,14 @@ function arm(b,label){if(b.classList.contains("armed"))return true;b.classList.a
 
 document.addEventListener("click",async e=>{
   const b=e.target.closest("[data-act]");if(!b)return;const a=b.dataset.act;
-  if(a==="rclear"){S.receipt=null;render();return}
+  if(a==="rqundo"){const q=S.rq.find(x=>x.id===b.dataset.id);if(!q||!q.txnId)return;
+    try{chk(await sb.from("wb_txns").delete().eq("id",q.txnId));if(q.path)await sb.storage.from("receipts").remove([q.path]);
+      q.txnId=null;q.path=null;q.state="needs";q.why="Undone. Fix the total or remove it.";await LOAD.txns();render();toast("Put back")}catch(err){fail(err)}return}
+  if(a==="rqsave"){const q=S.rq.find(x=>x.id===b.dataset.id);if(!q)return;const v=num(document.getElementById("rq-"+q.id)?.value);if(!(v>0)){toast("Enter the total");return}
+    q.total=v;b.disabled=true;try{await logReceiptTxn(q);render();toast(`Logged ${m2(v)}`)}catch(err){b.disabled=false;fail(err)}return}
+  if(a==="rqdrop"){S.rq=S.rq.filter(x=>x.id!==b.dataset.id);render();return}
+  if(a==="rqclear"){S.rq=S.rq.filter(x=>x.state==="reading");render();return}
+  if(a==="rzoom"){const q=S.rq.find(x=>x.id===b.dataset.id);if(!q)return;const ov=document.createElement("div");ov.className="overlay";ov.innerHTML=`<img src="${q.url}" alt="Receipt"><button class="btn" type="button">Close</button>`;ov.addEventListener("click",()=>ov.remove());document.body.appendChild(ov);return}
   if(a==="rview"){viewReceipt(b.dataset.path);return}
   if(a==="gsgo"||a==="gsdone"){const k=b.dataset.k;if(S.plan&&["buckets","partner","home"].includes(k)){S.plan.onboard={...(S.plan.onboard||{}),[k]:true};savePlan()}
     if(a==="gsgo"){S.tab=b.dataset.t;window.scrollTo(0,0)}render();return}
@@ -943,8 +959,7 @@ document.addEventListener("submit",async e=>{
     const doc={pool,amount:amt,note:val("lf-note").trim().slice(0,80),
       cat:val("lf-cat"),from:document.getElementById("lf-cush")?.checked?"cushion":"week",
       date:val("lf-date")||todayS(),ts:Date.now(),by:S.owner?"owner":"partner"};
-    if(S.receipt?.blob)doc.receiptBlob=S.receipt.blob;
-    try{await db.collection("txns").add(doc);toast(`Logged ${m2(amt)}`);S.receipt=null;f.reset();render()}catch(err){fail(err)}
+    try{await db.collection("txns").add(doc);toast(`Logged ${m2(amt)}`);f.reset();render()}catch(err){fail(err)}
   }
   if(f.id==="movef"){
     const amt=num(val("mv-amt"));if(!(amt>0)){toast("Enter the amount");return}
@@ -1034,24 +1049,57 @@ async function shrinkImage(file){
   const blob=await new Promise(r=>cv.toBlob(r,"image/jpeg",0.72));return {blob,url:URL.createObjectURL(blob),canvas:cv};
 }
 function loadScript(src){return new Promise((res,rej)=>{const s=document.createElement("script");s.src=src;s.onload=res;s.onerror=rej;document.head.appendChild(s)})}
+const AUTO_MAX=500;
 function findTotal(text){
   const lines=text.split(/\n/).map(l=>l.trim()).filter(Boolean);const amt=l=>{const m=[...l.matchAll(/(\d{1,4}[.,]\d{2})\b/g)].map(x=>parseFloat(x[1].replace(",",".")));return m.length?m[m.length-1]:null};
-  for(const re of [/\b(grand\s*)?total\b(?!.*(sub|savings|items|tax))/i,/amount\s*(due|paid)|balance\s*due|you\s*paid/i]){for(let i=lines.length-1;i>=0;i--){if(re.test(lines[i])){const v=amt(lines[i])??amt(lines[i+1]||"");if(v)return v}}}
-  const all=lines.map(amt).filter(v=>v!=null&&v<5000);return all.length?Math.max(...all):null;
+  for(const re of [/\b(grand\s*)?total\b(?!.*(sub|savings|items|tax))/i,/amount\s*(due|paid)|balance\s*due|you\s*paid/i]){for(let i=lines.length-1;i>=0;i--){if(re.test(lines[i])){const v=amt(lines[i])??amt(lines[i+1]||"");if(v)return {v,sure:true}}}}
+  const all=lines.map(amt).filter(v=>v!=null&&v<5000);return all.length?{v:Math.max(...all),sure:false}:null;
 }
 function findStore(text){const l=text.split(/\n/).map(x=>x.trim()).find(x=>/[A-Za-z]{3,}/.test(x)&&x.length<32);return l?l.replace(/[^\w&' .-]/g,"").trim():""}
+let ocrW=null,rqBusy=false;S.rq=[];
+async function ocr(canvas){
+  if(!window.Tesseract)await loadScript("https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js");
+  if(!ocrW)ocrW=await window.Tesseract.createWorker("eng");
+  const r=await ocrW.recognize(canvas);return r?.data?.text||"";
+}
+async function logReceiptTxn(q){
+  const row=chk(await sb.from("wb_txns").insert({household_id:HID,pool:q.pool,amount:q.total,src:"week",date:todayS()}).select("id").single());
+  let receipt=null;
+  if(q.blob){const path=`${ME}/${row.id}.jpg`;const up=await sb.storage.from("receipts").upload(path,q.blob,{contentType:"image/jpeg",upsert:true});if(!up.error)receipt=path}
+  chk(await sb.from("wb_txn_notes").insert({txn_id:row.id,household_id:HID,shared:!["aspen","grace"].includes(q.pool),note:q.store||"Receipt",cat:null,receipt}));
+  q.txnId=row.id;q.path=receipt;q.state="logged";
+  await LOAD.txns();
+}
+async function addReceipts(files,pool){
+  for(const f of files){const r=await shrinkImage(f);S.rq.unshift({id:Math.random().toString(36).slice(2),url:r.url,blob:r.blob,canvas:r.canvas,pool,state:"reading"})}
+  render();pumpQueue();
+}
+async function pumpQueue(){
+  if(rqBusy)return;rqBusy=true;
+  try{let q;while((q=S.rq.find(x=>x.state==="reading"))){
+    try{const text=await ocr(q.canvas);const t=findTotal(text);q.store=findStore(text);q.canvas=null;
+      if(t&&t.sure&&t.v<=AUTO_MAX){q.total=t.v;await logReceiptTxn(q)}
+      else{q.total=t?t.v:null;q.state="needs";q.why=!t?"Couldn't read the total. Type it in.":t.v>AUTO_MAX?"Big amount. Check it, then log it.":"Not sure this is the total. Check it."}
+    }catch(err){console.error(err);q.canvas=null;q.state="needs";q.why="Couldn't read it. Type the total in."}
+    render();
+  }}finally{rqBusy=false}
+}
+function receiptQueue(){
+  if(!S.rq||!S.rq.length)return "";
+  return `<div class="rq">${S.rq.map(q=>`<div class="rq-item">
+    <img src="${q.url}" class="rthumb" alt="Receipt" data-act="rzoom" data-id="${q.id}">
+    <div class="grow">${q.state==="reading"?`<div>Reading…</div><div class="small muted">${esc(poolName(q.pool))}</div>`
+      :q.state==="logged"?`<div><b class="num">${m2(q.total)}</b> ${esc(q.store||"")}</div><div class="small muted">Taken out of ${esc(poolName(q.pool))}</div>`
+      :`<div class="small" style="color:var(--warn)">${esc(q.why||"")}</div><div class="rq-fix"><input id="rq-${q.id}" inputmode="decimal" placeholder="Total" value="${q.total?q.total.toFixed(2):""}"><button type="button" class="btn sm" data-act="rqsave" data-id="${q.id}">Log it</button></div>`}</div>
+    ${q.state==="logged"?`<button type="button" class="x" data-act="rqundo" data-id="${q.id}">Undo</button>`:q.state==="needs"?`<button type="button" class="x" data-act="rqdrop" data-id="${q.id}" aria-label="Remove">✕</button>`:""}
+  </div>`).join("")}
+  ${S.rq.every(q=>q.state!=="reading")?`<button type="button" class="x" data-act="rqclear">Clear this list</button>`:""}</div>`;
+}
 document.addEventListener("change",async e=>{
-  if(e.target.id!=="lf-photo")return;const file=e.target.files?.[0];if(!file)return;
-  try{const r=await shrinkImage(file);const keep={a:val("lf-amt"),n:val("lf-note")};S.receipt={blob:r.blob,url:r.url,status:"Reading the total…"};render();
-    if(document.getElementById("lf-amt"))document.getElementById("lf-amt").value=keep.a;if(document.getElementById("lf-note"))document.getElementById("lf-note").value=keep.n;
-    if(!window.Tesseract)await loadScript("https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js");
-    const res=await window.Tesseract.recognize(r.canvas,"eng");const text=res?.data?.text||"";
-    const total=findTotal(text),store=findStore(text);
-    const amtEl=document.getElementById("lf-amt"),noteEl=document.getElementById("lf-note");
-    if(total&&amtEl&&!amtEl.value)amtEl.value=total.toFixed(2);if(store&&noteEl&&!noteEl.value)noteEl.value=store;
-    S.receipt.status=total?`Found ${m2(total)}. Check it before saving.`:"Couldn't read the total. Type it in.";
-    const st=document.querySelector(".receipt-row .small");if(st)st.textContent=S.receipt.status;
-  }catch(err){console.error(err);if(S.receipt){S.receipt.status="Photo attached. Type the total in.";const st=document.querySelector(".receipt-row .small");if(st)st.textContent=S.receipt.status}}
+  if(e.target.id!=="lf-cam"&&e.target.id!=="lf-multi")return;
+  const files=[...(e.target.files||[])];e.target.value="";if(!files.length)return;
+  const pool=document.querySelector('#logf [data-act="pool"][aria-pressed="true"]')?.dataset.p||(S.view==="grace"?"grace":"aspen");
+  try{await addReceipts(files.slice(0,20),pool)}catch(err){console.error(err);toast("Couldn't open that photo")}
 });
 async function viewReceipt(path){
   const r=await sb.storage.from("receipts").createSignedUrl(path,300);if(r.error){toast("Couldn't open the receipt");return}
