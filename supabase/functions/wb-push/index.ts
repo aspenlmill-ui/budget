@@ -45,7 +45,7 @@ function overall(out: any, pools: string[], frac: number) {
   if (st.includes("bad")) return "🔴"; if (st.includes("warn")) return "🟡";
   const spent = pools.reduce((s, p) => s + out[p].spent, 0), alloc = pools.reduce((s, p) => s + out[p].alloc, 0);
   if (frac >= 0.3 && alloc > 0 && spent / alloc <= frac * 0.7) return "🔥";
-  return "🟢";
+  return "🦖";
 }
 // deno-lint-ignore no-explicit-any
 function summarize(settings: any, txns: any[], moves: any[], events: any[], today: string) {
