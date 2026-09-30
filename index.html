@@ -444,7 +444,7 @@ function onboardSteps(){
     ["buckets","Set what you're saving for","Vault tab → What we're saving for. Rename or add buckets.",!!ob.buckets,"vault"],
     ["partner",`Invite ${NAMES.grace}`,`Setup tab shows your join code. ${NAMES.grace} makes an account and picks "Join your partner".`,!!ob.partner,"setup"],
     ["home","Add the app to your Home Screen","In Safari tap Share → Add to Home Screen, then open it from there.",!!ob.home||matchMedia("(display-mode: standalone)").matches||!!navigator.standalone,null],
-    ["push","Turn on 7 PM notifications","Setup tab → This phone. Needs the Home Screen app on iPhone.",push,"setup"],
+    ["push","Turn on notifications","Setup tab → This phone. Needs the Home Screen app on iPhone.",push,"setup"],
     ["log","Log your first purchase","Home tab → Log a purchase.",S.txns.length>0,"week"]];
 }
 function gettingStarted(){
@@ -1570,7 +1570,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202609301324";
+const BUILD="202609301325";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
@@ -1668,7 +1668,7 @@ async function enablePush(btn){
     toast("You'll get your numbers every night at 7 PM");if(btn)btn.textContent="Notifications are on";
   }catch(err){console.error(err);toast("Couldn't turn on notifications. Try again.")}
 }
-function pushButton(){return `<button class="btn ghost" data-act="push">Turn on 7 PM notifications</button>`}
+function pushButton(){return `<button class="btn ghost" data-act="push">Turn on notifications</button>`}
 
 /* ---------- start ---------- */
 async function start(){
