@@ -477,12 +477,26 @@ document.addEventListener("submit",async e=>{
   toast(cur?`${m2(amt)} logged · ${cur.name}: ${m2(cur.left)} left`:`${m2(amt)} logged`);
 });
 
+/* ---------- manual bills: ask if they were paid ---------- */
+function manualDue(){
+  if(!S.plan)return [];const today=dn(todayS()),sn=S.plan.snooze||{};
+  return billRows().filter(r=>(r.b.auto===false||isVar(r.b))&&!r.paid&&r.due!==null&&r.due<=today&&r.due>=today-7&&sn[r.key]!==todayS());
+}
+function dueTodayCard(){
+  const rows=manualDue();if(!rows.length)return "";const today=dn(todayS());
+  return `<div class="card" id="bills" style="border-color:var(--warn)"><h2>Did you pay ${rows.length>1?"these":"this"}?</h2>
+    <div class="small muted">These bills don't autopay. Mark them once they're paid.</div>
+    <div class="list">${rows.map(r=>billRowHtml(r,today)+(S.payOpen===r.key||S.varOpen===r.key?"":`<div style="text-align:right;margin-top:-6px"><button class="x" data-act="snooze" data-key="${esc(r.key)}">Not yet, ask tomorrow</button></div>`)).join("")}</div>
+  </div>`;
+}
+
 function weekTab(){
   const c=compute();
   const list=S.txns.filter(t=>wk(t.date)===c.cw).sort((a,b)=>b.ts-a.ts);
   const pool=S.aPool||"aspen";
   const f=weekFrac(c);
   return `<section>
+    ${dueTodayCard()}
     ${gettingStarted()}
     ${statusBanner(c,POOLS)}
     ${rescueBanner(c)}
@@ -1047,6 +1061,7 @@ document.addEventListener("click",async e=>{
     S.plan.paid=(S.plan.paid||[]).filter(x=>x!==k);S.plan.paidLog=(S.plan.paidLog||[]).filter(x=>x.key!==k);
     S.plan.skipAuto=[...new Set([...(S.plan.skipAuto||[]),k])];render();savePlan();return}
   if(a==="billvar"){const bl=S.plan.bills[+b.dataset.i];bl.variable=b.checked;render();savePlan();toast(b.checked?`${bl.name}: enter the amount each month`:`${bl.name}: same amount every month`);return}
+  if(a==="snooze"){S.plan.snooze={...(S.plan.snooze||{})};for(const k of Object.keys(S.plan.snooze))if(S.plan.snooze[k]!==todayS())delete S.plan.snooze[k];S.plan.snooze[b.dataset.key]=todayS();render();savePlan();return}
   if(a==="varopen"){S.varOpen=b.dataset.key;render();document.getElementById("vf-amt")?.focus();return}
   if(a==="varcancel"){S.varOpen=null;render();return}
   if(a==="billauto"){const bl=S.plan.bills[+b.dataset.i];bl.auto=b.checked;render();savePlan();return}
@@ -1340,7 +1355,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202609300833";
+const BUILD="202609300836";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);

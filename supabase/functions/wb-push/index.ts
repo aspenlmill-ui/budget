@@ -84,6 +84,66 @@ function summarize(settings: any, txns: any[], moves: any[], events: any[], toda
   return { out, names, customs, ev, resetTomorrow: next === t + 1, frac: Math.min(1, Math.max(0, (t - cw + 1) / Math.max(1, next - cw))) };
 }
 
+// 5 PM check: bills that don't autopay and are due today (or recently, still unpaid).
+// deno-lint-ignore no-explicit-any
+function manualDue(plan: any, today: string) {
+  const t = dn(today), [Y, M] = today.split("-").map(Number), paid = new Set(plan.paid || []), sn = plan.snooze || {};
+  const phase = plan.postClosing ? "post" : "pre";
+  // deno-lint-ignore no-explicit-any
+  const out: any[] = [];
+  for (const b of plan.bills || []) {
+    if (!(b.auto === false || b.variable)) continue;
+    if (!(b.phase === "both" || b.phase === phase || !b.phase)) continue;
+    const d = parseInt(String(b.day || "").replace(/\D/g, ""), 10); if (!(d >= 1 && d <= 31)) continue;
+    for (const off of [0, -1]) {
+      const y = M + off < 1 ? Y - 1 : Y, m = ((M - 1 + off + 12) % 12);
+      const last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate(), due = Math.round(Date.UTC(y, m, Math.min(d, last)) / DAY);
+      const key = `${b.name}|${y}-${String(m + 1).padStart(2, "0")}`;
+      if (due <= t && due >= t - 7 && !paid.has(key) && sn[key] !== today) { const v = plan.varAmt?.[key]; out.push({ name: b.name, due, amt: v != null ? +v : +b.amt || 0, est: b.variable && v == null }); }
+    }
+  }
+  return out;
+}
+
+// deno-lint-ignore no-explicit-any
+async function billCheck(now: { date: string }, force: boolean, only: string | null) {
+  const { data: subs } = await supabase.from("push_subscriptions").select("id,user_id,endpoint,p256dh,auth_key");
+  let sent = 0, skipped = 0, removed = 0;
+  const done = new Set<string>();
+  for (const sub of subs ?? []) {
+    if (only && sub.user_id !== only) continue;
+    if (!force && !done.has(sub.user_id)) {
+      const { data: already } = await supabase.from("notification_send_log").select("id").eq("user_id", sub.user_id).eq("local_date", now.date).eq("notification_type", "bill_check").maybeSingle();
+      if (already) { skipped++; continue; }
+    }
+    const { data: member } = await supabase.from("household_members").select("household_id").eq("user_id", sub.user_id).maybeSingle();
+    if (!member?.household_id) continue;
+    const hid = member.household_id;
+    const [{ data: hh }, { data: st }, { data: pl }] = await Promise.all([
+      supabase.from("households").select("created_by").eq("id", hid).maybeSingle(),
+      supabase.from("wb_settings").select("data").eq("household_id", hid).maybeSingle(),
+      supabase.from("wb_plan").select("data").eq("household_id", hid).maybeSingle(),
+    ]);
+    const canSee = hh?.created_by === sub.user_id || !!st?.data?.partnerFull;
+    if (!canSee || !pl?.data) continue;
+    const due = manualDue(pl.data, now.date);
+    if (!due.length) continue;
+    const t = dn(now.date);
+    const title = due.length === 1 ? `Did you pay ${due[0].name}?` : `Did you pay these ${due.length} bills?`;
+    const body = due.map((x) => `${x.name}: ${x.est ? "about " : ""}${money(x.amt)}${x.due < t ? " (was due " + new Date(x.due * DAY).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) + ")" : " due today"}`).join("\n") + "\nTap to mark it paid.";
+    try {
+      await webpush.sendNotification({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth_key } }, JSON.stringify({ notification: { title, body, tag: `bills-${now.date}`, navigate: APP_URL + "#bills" } }), { TTL: 6 * 3600 });
+      sent++;
+      if (!force && !done.has(sub.user_id)) { done.add(sub.user_id); await supabase.from("notification_send_log").insert({ user_id: sub.user_id, local_date: now.date, notification_type: "bill_check" }); }
+    } catch (e: any) {
+      const status = e?.statusCode ?? e?.status;
+      if (status === 404 || status === 410 || (status === 400 && String(e?.body || "").includes("VapidPkHashMismatch"))) { await supabase.from("push_subscriptions").delete().eq("id", sub.id); removed++; }
+      else console.error(e);
+    }
+  }
+  return { kind: "bills", sent, skipped, removed };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   const url = new URL(req.url);
@@ -93,6 +153,7 @@ Deno.serve(async (req) => {
   const now = easternNow();
   const force = url.searchParams.get("force") === "1";
   const only = url.searchParams.get("user");
+  if ((force && url.searchParams.get("kind") === "bills") || (!force && now.hour === 17)) return Response.json({ ok: true, eastern: now, ...(await billCheck(now, force, only)) });
   if (!force && now.hour !== 19) return Response.json({ ok: true, skipped: true, eastern: now });
 
   const { data: subs, error } = await supabase.from("push_subscriptions").select("id,user_id,endpoint,p256dh,auth_key");
