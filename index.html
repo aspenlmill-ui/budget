@@ -165,7 +165,7 @@ html,body{margin:0}
 <body>
 
 <div class="wrap" id="app">
-  <header><div><div class="label">Mill family</div><h1>Weekly money</h1></div></header>
+  <header><div><div class="label">Mill family</div><h1>Family Budget</h1></div></header>
   <div class="empty">Connecting to your budget… Spending, cushions and the plan appear here once it loads.</div>
 </div>
 <div class="toast" id="toast" hidden></div>
@@ -195,16 +195,24 @@ const m0=n=>money(n,false), m2=n=>money(n,true);
 const num=v=>{const n=parseFloat(String(v).replace(/[$,]/g,""));return isFinite(n)?Math.round(n*100)/100:NaN};
 
 function anchor(){return S.settings?.anchor||"2026-09-25"}
-/* Weeks run 7 days from the anchor; a manual "Start new week" begins a new week early and the 7-day rhythm continues from there. */
+/* Budget periods: weekly, every 2 weeks, or monthly (on the 1st). A manual "start new" or a change of period type begins a new period early. */
+const PERIOD={week:{days:7,noun:"week",adj:"Weekly",this:"this week",per:"week",label:"Weekly"},biweek:{days:14,noun:"pay period",adj:"Every-2-weeks",this:"this pay period",per:"2 weeks",label:"Every 2 weeks"},month:{days:30.44,noun:"month",adj:"Monthly",this:"this month",per:"month",label:"Monthly"}};
+function periodSegs(){const s=S.settings||{};return s.periods&&s.periods.length?s.periods:[{from:anchor(),kind:"week"}]}
+function kindAt(w){let k=periodSegs()[0].kind;for(const g of periodSegs())if(dn(g.from)<=w)k=g.kind;return PERIOD[k]?k:"week"}
+function nextAfter(w){const k=kindAt(w);if(k==="week")return w+7;if(k==="biweek")return w+14;const d=new Date(w*DAY);return Math.round(Date.UTC(d.getUTCFullYear(),d.getUTCMonth()+1,1)/DAY)}
+function forcedStarts(){const a=dn(anchor());return [...(S.settings?.starts||[]),...periodSegs().slice(1).map(g=>g.from)].map(dn).filter(x=>x>a).sort((x,y)=>x-y)}
+function stepFrom(w,forced){let nx=nextAfter(w);const m=forced.find(x=>x>w&&x<nx);return m!==undefined?m:nx}
 function weekStarts(){
-  const t=dn(todayS()),a=dn(anchor());
-  const man=(S.settings?.starts||[]).map(dn).filter(x=>x>a).sort((x,y)=>x-y);
+  const t=dn(todayS()),a=dn(anchor()),forced=forcedStarts();
   const out=[];let w=a;
-  while(w<=t){out.push(w);let nx=w+7;const m=man.find(x=>x>w&&x<nx);if(m!==undefined)nx=m;w=nx}
+  while(w<=t){out.push(w);w=stepFrom(w,forced)}
   return out.length?out:[a];
 }
+function PER(){const L=weekStarts();return PERIOD[kindAt(L[L.length-1])]}
+function cap(s){return s.charAt(0).toUpperCase()+s.slice(1)}
+function perCheckFactor(){return 14/PER().days}
 function wk(s){const L=weekStarts(),n=dn(s);let r=L[0];for(const w of L){if(w<=n)r=w;else break}return r}
-function nextReset(){const L=weekStarts();return L[L.length-1]+7}
+function nextReset(){const L=weekStarts();return stepFrom(L[L.length-1],forcedStarts())}
 function budgetFor(p,w){
   const h=[...(S.settings?.history||[])].sort((a,b)=>dn(a.from)-dn(b.from));
   let b=0;for(const e of h){if(dn(e.from)<=w)b=+e[p]||0}return b;
@@ -232,16 +240,16 @@ function fail(e){console.error(e);toast(e?.code==="42501"?"You don't have permis
 function render(){
   const app=document.getElementById("app");
   if(!S.ready){return}
-  if(!db){app.innerHTML=`<header><div><div class="label">Weekly budget</div><h1>Weekly money</h1></div></header><div class="empty">This budget syncs through Claude. Open it from the Claude app or claude.ai while signed in to see and log spending.</div>`;return}
+  if(!db){app.innerHTML=`<header><div><div class="label">Family Budget</div><h1>Family Budget</h1></div></header><div class="empty">This budget syncs through Claude. Open it from the Claude app or claude.ai while signed in to see and log spending.</div>`;return}
   if(!S.settingsLoaded){return}
-  if(!S.settings){app.innerHTML=S.owner?firstRun():`<header><div><div class="label">Weekly budget</div><h1>Almost ready</h1></div></header><div class="empty">This budget hasn't been set up yet. Once the owner sets it up, your weekly number shows here.</div>`;return}
+  if(!S.settings){app.innerHTML=S.owner?firstRun():`<header><div><div class="label">Family Budget</div><h1>Almost ready</h1></div></header><div class="empty">This budget hasn't been set up yet. Once the owner sets it up, your weekly number shows here.</div>`;return}
   const keep={a:document.getElementById("lf-amt")?.value,n:document.getElementById("lf-note")?.value};
   app.innerHTML=S.view==="aspen"?aspenView():graceView();
   if(keep.a&&document.getElementById("lf-amt"))document.getElementById("lf-amt").value=keep.a;
   if(keep.n&&document.getElementById("lf-note"))document.getElementById("lf-note").value=keep.n;
 }
 
-function weekLine(c){const n=nextReset();return `Week of ${short(c.cw)} · refills ${pretty(n)}`}
+function weekLine(c){const n=nextReset();return `${PER().label} · since ${short(c.cw)} · refills ${pretty(n)}`}
 
 function graceView(){
   const c=compute(),g=c.grace,h=c.household;
@@ -253,7 +261,7 @@ function graceView(){
     ${S.owner?`<button class="btn ghost sm" data-act="view" data-v="aspen">Back to my view</button>`:""}</header>
   ${statusBanner(c,["grace",...pp])}
   <div class="card hero st-${poolStatus(g,weekFrac(c))} ${g.left<0?"over":""}">
-    <div class="label">You can spend this week</div>
+    <div class="label">You can spend ${PER().this}</div>
     <div class="big num">${m2(Math.max(g.left,g.left<0?g.left:0))}</div>
     ${g.left<0?`<div class="chip bad">${m2(-g.left)} over. Let ${esc(NAMES.aspen)} know so money can be moved to cover it.</div>`
       :`<div class="muted small">${m0(g.spent)} spent of ${m0(g.alloc)}</div>`}
@@ -263,16 +271,16 @@ function graceView(){
   </div>
   <div class="card pool st-${poolStatus(h,weekFrac(c))} ${h.left<0?"over":""}">
     <div class="bar" style="order:9"><i style="width:${pct(h.spent,h.alloc)}%"></i></div>
-    <div class="label"><span class="sdot ${poolStatus(h,weekFrac(c))}"></span>Household this week</div>
+    <div class="label"><span class="sdot ${poolStatus(h,weekFrac(c))}"></span>${esc(NAMES.household)} ${PER().this}</div>
     <div class="left num">${m2(h.left)}</div>
     <div class="muted small">${esc(NOTES.household)}</div>
   </div>
   ${partnerPools().filter(p=>p!=="household").map(p=>{const x=c[p],st=poolStatus(x,weekFrac(c));return `<div class="card pool st-${st} ${x.left<0?"over":""}">
-    <div class="label"><span class="sdot ${st}"></span>${esc(NAMES[p])} this week</div><div class="left num">${m2(x.left)}</div>
+    <div class="label"><span class="sdot ${st}"></span>${esc(NAMES[p])} ${PER().this}</div><div class="left num">${m2(x.left)}</div>
     <div class="bar"><i style="width:${pct(x.spent,x.alloc)}%"></i></div></div>`}).join("")}
   ${evs.map(e=>eventCard(e,false)).join("")}
   ${logForm(pool,true)}
-  <div class="card"><h2>This week</h2>${txList(mine,true)}</div>
+  <div class="card"><h2>${cap(PER().this)}</h2>${txList(mine,true)}</div>
   ${pushButton()}
   <button class="btn ghost" data-act="signout">Sign out</button>
   ${accountCard()}`;
@@ -301,7 +309,7 @@ function eventCard(e,owner){const s=evStats(e);return `<div class="card pool ${s
 function specialTab(){
   const act=activeEvents(),closed=S.events.filter(e=>e.active===false);
   return `<section>
-    <div class="muted small">Special budgets are for one-off things like a wedding, a trip or a birthday. They sit outside the weekly cards, so a wedding doesn't wreck a normal week. Log purchases to them from the Week tab.</div>
+    <div class="muted small">Special budgets are for one-off things like a wedding, a trip or a birthday. They sit outside the regular cards, so a wedding doesn't wreck a normal ${PER().noun}. Log purchases to them from the Home tab.</div>
     ${act.length?act.map(e=>eventCard(e,true)).join(""):`<div class="empty">No special budgets yet. Add one below, like "Wedding, $200".</div>`}
     <form class="card" id="evf"><h2>New special budget</h2>
       <div class="row"><label class="f">Name<input id="ev-name" placeholder="Wyoming Christmas trip" autocomplete="off"></label>
@@ -341,7 +349,7 @@ function logForm(pool,grace){
 }
 
 function txList(list,grace,noEmpty){
-  if(!list.length)return noEmpty?"":`<div class="muted small">Nothing logged yet this week.</div>`;
+  if(!list.length)return noEmpty?"":`<div class="muted small">Nothing logged yet ${PER().this}.</div>`;
   return `<div class="list">${list.map(t=>`<div class="item">
     <div class="grow"><div>${esc(t.note||t.cat||(t.mine?"Purchase":`${poolName(t.pool)} purchase`))}</div>
     <div class="muted small">${esc(poolName(t.pool))}${t.cat?" · "+esc(t.cat):""}${t.from==="cushion"?" · from cushion":""} · ${short(dn(t.date))}</div></div>
@@ -351,7 +359,7 @@ function txList(list,grace,noEmpty){
 }
 
 function aspenView(){
-  const tabs=[["week","Week"],["special","Special"],["move","Move"],["vault","Vault"],["plan","Plan"],["setup","Setup"]];
+  const tabs=[["week","Home"],["special","Special"],["move","Move"],["vault","Vault"],["plan","Plan"],["setup","Setup"]];
   let body="";
   if(S.tab==="move")body=moveTab();else if(S.tab==="special")body=specialTab();else if(S.tab==="plan")body=planTab();else if(S.tab==="vault")body=vaultTab();else if(S.tab==="setup")body=setupTab();else body=weekTab();
   const c=compute();
@@ -368,10 +376,10 @@ function rescueBanner(c){
     const opts=[];
     if(c[p].cushion>0)opts.push([`cushion:${p}`,`${NAMES[p]}'s cushion`,Math.min(need,c[p].cushion)]);
     for(const q of POOLS)if(q!==p&&c[q].cushion>0)opts.push([`cushion:${q}`,`${NAMES[q]}'s cushion`,Math.min(need,c[q].cushion)]);
-    for(const q of POOLS)if(q!==p&&c[q].left>0)opts.push([`week:${q}`,`${NAMES[q]} this week`,Math.min(need,c[q].left)]);
+    for(const q of POOLS)if(q!==p&&c[q].left>0)opts.push([`week:${q}`,`${NAMES[q]} ${PER().this}`,Math.min(need,c[q].left)]);
     opts.push(["usaa",(S.plan?L().save:"Savings")+" savings",need]);
-    return `<div class="alert"><div><strong>${esc(NAMES[p])} is ${m2(need)} over this week.</strong>
-      <div class="small">Cover it from one of these, starting with the cushion. If you leave it, it comes out of ${esc(NAMES[p])}'s cushion when the week resets.</div></div>
+    return `<div class="alert"><div><strong>${esc(NAMES[p])} is ${m2(need)} over ${PER().this}.</strong>
+      <div class="small">Cover it from one of these, starting with the cushion. If you leave it, it comes out of ${esc(NAMES[p])}'s cushion when the ${PER().noun} resets.</div></div>
       <div class="opts">${opts.slice(0,4).map(o=>`<button class="btn sm ${o[0]==="usaa"?"ghost":""}" data-act="rescue" data-from="${o[0]}" data-to="week:${p}" data-amt="${o[2]}">${m2(o[2])} from ${esc(o[1])}</button>`).join("")}</div></div>`;
   }).join("");
 }
@@ -394,7 +402,7 @@ function overallStatus(c,pools){
   if(f>=0.3&&alloc>0&&spent/alloc<=f*0.7)return "fire";
   return "good";
 }
-const STATUS={fire:["🔥","Ahead of plan","Spending is well under pace this week. Nice."],good:["🟢","On track","Spending is right where it should be."],warn:["🟡","Be careful","Something is running ahead of pace or close to its limit."],bad:["🔴","Over budget","A card is over and its cushion can't cover it. Move money or pause spending."]};
+const STATUS={fire:["🔥","Ahead of plan","Spending is well under pace. Nice."],good:["🟢","On track","Spending is right where it should be."],warn:["🟡","Be careful","Something is running ahead of pace or close to its limit."],bad:["🔴","Over budget","A card is over and its cushion can't cover it. Move money or pause spending."]};
 function statusBanner(c,pools){const s=overallStatus(c,pools),[em,t,d]=STATUS[s];
   return `<div class="status ${s}"><span class="em" aria-hidden="true">${em}</span><div><b>${t}</b><div class="small muted">${d}</div></div></div>`}
 
@@ -410,7 +418,7 @@ function onboardSteps(){
     ["partner",`Invite ${NAMES.grace}`,`Setup tab shows your join code. ${NAMES.grace} makes an account and picks "Join your partner".`,!!ob.partner,"setup"],
     ["home","Add the app to your Home Screen","In Safari tap Share → Add to Home Screen, then open it from there.",!!ob.home||matchMedia("(display-mode: standalone)").matches||!!navigator.standalone,null],
     ["push","Turn on 7 PM notifications","Setup tab → This phone. Needs the Home Screen app on iPhone.",push,"setup"],
-    ["log","Log your first purchase","Week tab → Log a purchase.",S.txns.length>0,"week"]];
+    ["log","Log your first purchase","Home tab → Log a purchase.",S.txns.length>0,"week"]];
 }
 function gettingStarted(){
   if(!S.owner||S.settings?.onboardDone)return "";
@@ -468,21 +476,21 @@ function weekTab(){
       <div class="bar"><i style="width:${pct(x.spent,x.alloc)}%"></i></div>
       <div class="muted small">${m0(x.spent)} of ${m0(x.alloc)}${x.alloc!==x.budget?` <span title="Includes money moved">(budget ${m0(x.budget)})</span>`:""}</div>
       <span class="chip ${x.cushion<0?"bad":""}">Cushion ${m2(x.cushion)}</span></div>`}).join("")}</div>
-    <div class="muted small">Cushion is what was left in past weeks. Unspent money rolls in when the week resets; overspending comes out of it.</div>
+    <div class="muted small">Cushion is what was left over before. Unspent money rolls in when the ${PER().noun} resets; overspending comes out of it.</div>
     ${logForm(pool,false)}
-    <div class="card"><h2>This week's purchases</h2>${txList(list,false)}</div>
+    <div class="card"><h2>${cap(PER().this)}: purchases</h2>${txList(list,false)}</div>
     ${reloadCard(c)}
-    <div class="card"><h2>Start a new week</h2>
-      <div class="small">The week resets on its own ${esc(pretty(nextReset()))}. Start one now if it's payday or you want a fresh week early. Whatever's left (${m2(POOLS.reduce((s,p)=>s+c[p].left,0))} total) moves into the cushions, and every card refills to its full weekly amount.</div>
-      ${c.cw===dn(todayS())?`<div class="muted small" style="margin-top:8px">A new week already started today.</div>`
-        :`<button class="btn" data-act="newweek" style="margin-top:10px">Start new week</button>`}
+    <div class="card"><h2>Start a new ${PER().noun}</h2>
+      <div class="small">It resets on its own ${esc(pretty(nextReset()))}. Start one now if it's payday or you want a fresh start early. Whatever's left (${m2(POOLS.reduce((s,p)=>s+c[p].left,0))} total) moves into the cushions, and every card refills to its full weekly amount.</div>
+      ${c.cw===dn(todayS())?`<div class="muted small" style="margin-top:8px">A new ${PER().noun} already started today.</div>`
+        :`<button class="btn" data-act="newweek" style="margin-top:10px">Start new ${PER().noun}</button>`}
     </div>
     ${spendCard()}
     <button class="btn ghost" data-act="view" data-v="grace">Preview ${esc(NAMES.grace)}'s view</button>
   </section>`;
 }
 
-function epLabel(ep){if(ep==="usaa")return (S.plan?L().save:"Savings")+" savings";if(ep.startsWith("event:"))return poolName(ep)+" (special)";const [k,p]=ep.split(":");return `${NAMES[p]} ${k==="week"?"this week":"cushion"}`}
+function epLabel(ep){if(ep==="usaa")return (S.plan?L().save:"Savings")+" savings";if(ep.startsWith("event:"))return poolName(ep)+" (special)";const [k,p]=ep.split(":");return `${NAMES[p]} ${k==="week"?PER().this:"cushion"}`}
 function epAvail(ep,c){if(ep==="usaa")return null;if(ep.startsWith("event:")){const e=S.events.find(x=>"event:"+x.id===ep);return e?evStats(e).left:0}const [k,p]=ep.split(":");return k==="week"?c[p].left:c[p].cushion}
 function eps(){const e=[];for(const p of POOLS){e.push(`week:${p}`,`cushion:${p}`)}for(const v of activeEvents())e.push("event:"+v.id);e.push("usaa");return e}
 
@@ -502,10 +510,10 @@ function moveTab(){
         <label class="f">Reason<input id="mv-why" placeholder="Birthday dinner"></label>
       </div>
       <button class="btn" type="submit">Move money</button>
-      <div class="muted small">"This week" changes only the current week. "Cushion" is the rollover savings for that person. Moving from savings adds money that wasn't in the weekly budget.</div>
+      <div class="muted small">"${cap(PER().this)}" changes only the current ${PER().noun}. "Cushion" is the rollover savings for that person. Moving from savings adds money that wasn't in the budget.</div>
     </form>
     <div class="card"><h2>Where things stand</h2>
-      ${POOLS.map(p=>`<div class="kv"><span>${NAMES[p]}</span><span class="small muted">week <b>${m2(c[p].left)}</b> · cushion <b>${m2(c[p].cushion)}</b></span></div>`).join("")}
+      ${POOLS.map(p=>`<div class="kv"><span>${NAMES[p]}</span><span class="small muted">now <b>${m2(c[p].left)}</b> · cushion <b>${m2(c[p].cushion)}</b></span></div>`).join("")}
     </div>
     <div class="card"><h2>Move history</h2>
       ${hist.length?`<div class="list">${hist.map(m=>`<div class="item"><div class="grow">
@@ -513,7 +521,7 @@ function moveTab(){
         <div class="muted small">${esc(m.reason||"No reason")} · ${short(dn(m.date))}</div></div>
         <b class="num">${m2(m.amount)}</b>
         <button class="x" data-act="delmv" data-id="${esc(m.id)}">Undo</button></div>`).join("")}</div>`
-      :`<div class="muted small">No moves yet. When a week runs over, move money here or use the buttons on the Week tab.</div>`}
+      :`<div class="muted small">No moves yet. When a card runs over, move money here or use the buttons on the Home tab.</div>`}
     </div>
   </section>`;
 }
@@ -541,19 +549,17 @@ function billsCard(){
   const P=S.plan,rows=billRows(),pay=nextPayday(),today=dn(todayS()),lb=L();
   const t=new Date(),y=t.getFullYear(),m=t.getMonth();
   /* due before payday: this month's unpaid ones before payday, plus next month's early ones if payday crosses the month */
-  let beforePay=0;
-  for(const r of rows){const d=dayOf(r.b);if(d===null)continue;
-    if(!r.paid&&r.due<pay)beforePay+=+r.b.amt||0;
-    const nx=dueIn(m===11?y+1:y,(m+1)%12,d);if(nx<pay&&nx>r.due)beforePay+=+r.b.amt||0}
+  const beforePay=dueBeforePayday("chase"),fromSav=dueBeforePayday("usaa");
   const total=rows.reduce((s,r)=>s+(+r.b.amt||0),0),paidAmt=rows.filter(r=>r.paid).reduce((s,r)=>s+(paidInfo(r.key)?.amount??(+r.b.amt||0)),0);
   const chase=+P.accounts?.chase||0,cover=chase-beforePay;
   const month=t.toLocaleDateString("en-US",{month:"long"});
   return `<div class="card"><h2>${esc(month)} bills</h2>
     <div class="split">
-      <span>Due before payday (${short(pay)})</span><b class="num">${m2(beforePay)}</b>
-      <span class="muted small">${esc(lb.bills)} balance</span><b class="num small">${m2(chase)}</b>
+      <span>${esc(lb.bills)} bills due before payday (${short(pay)})</span><b class="num">${m2(beforePay)}</b>
+      <span class="muted small">${esc(lb.bills)} balance now</span><b class="num small">${m2(chase)}</b>
     </div>
     <span class="chip ${cover<0?"bad":cover<100?"warn":""}" style="margin-top:8px">${cover<0?`${m2(-cover)} short before payday`:`Covered, ${m2(cover)} to spare`}</span>
+    ${fromSav>0?`<div class="small muted" style="margin-top:6px">Also coming out of ${esc(lb.save)} before payday: ${m2(fromSav)}</div>`:""}
     <div class="bar" style="margin-top:12px"><i style="width:${pct(paidAmt,total)}%"></i></div>
     <div class="muted small" style="margin-top:4px">${m0(paidAmt)} of ${m0(total)} paid this month</div>
     <div class="list" style="margin-top:6px">${rows.map(r=>billRowHtml(r,today)).join("")}</div>
@@ -602,6 +608,41 @@ function billRowHtml(r,today){
 
 /* ---------- income: paychecks and extra money ---------- */
 function incomeSources(){return [["mine",`${NAMES.aspen}'s paycheck`],["partner",`${NAMES.grace}'s pay`],["drill","Drill pay"],["ot","Overtime / bonus"],["reimb","Reimbursement"],["other","Other"]]}
+/* ---------- how a paycheck or extra money splits ---------- */
+function chaseDueUntil(end){
+  const P=S.plan,phase=P.postClosing?"post":"pre",paid=new Set(P.paid||[]),today=dn(todayS());let sum=0;const items=[];
+  const t=new Date();for(let k=0;k<3;k++){const y=t.getFullYear()+Math.floor((t.getMonth()+k)/12),m=(t.getMonth()+k)%12;
+    for(const b of P.bills||[]){if(!(b.phase==="both"||b.phase===phase)||billAcct(b)!=="chase")continue;const d=dayOf(b);if(d===null)continue;
+      const due=dueIn(y,m,d),key=b.name+"|"+ds(due).slice(0,7);if(due<end&&!paid.has(key)&&due>=today-31){sum+=+b.amt||0;items.push({name:b.name,due,amt:+b.amt||0})}}}
+  return {sum:Math.round(sum*100)/100,items:items.sort((a,b)=>a.due-b.due)};
+}
+function incomeSplit(amt,src,dateS){
+  const P=S.plan,c=compute(),lb=L(),chase=+P.accounts?.chase||0;
+  const d=dn(dateS||todayS()),end=Math.max(d,dn(todayS()))+14,due=chaseDueUntil(end);
+  const short=Math.max(0,Math.round((due.sum-chase)*100)/100);
+  if(src==="mine"){const toChase=Math.min(amt,short),spend=Math.round(POOLS.reduce((s,p)=>s+c[p].budget,0)*perCheckFactor()*100)/100;
+    return {toChase,spend,toSave:Math.round((amt-toChase-spend)*100)/100,due,chase,end}}
+  if(src==="partner"){const hers=Math.round((+P.paycheck?.graceBills||0)*12/26*100)/100;return {toChase:0,spend:0,hers,toSave:Math.round((amt-hers)*100)/100,due,chase,end}}
+  const toChase=Math.min(amt,short);return {toChase,spend:0,toSave:Math.round((amt-toChase)*100)/100,due,chase,end};
+}
+function incomePreviewHtml(){
+  const amt=num(val("if-amt")),src=val("if-src")||"mine";
+  if(!(amt>0))return `<div class="small muted">Type the amount to see how much has to go to bills.</div>`;
+  const s=incomeSplit(amt,src,val("if-date")),lb=L();
+  return `<div class="ledger">
+    <div><span>${esc(lb.bills)} bills due by ${short(s.end)}</span><b>${m2(s.due.sum)}</b></div>
+    <div><span class="muted">${esc(lb.bills)} has now</span><b class="muted">${m2(s.chase)}</b></div>
+    <div class="strong"><span>Put in ${esc(lb.bills)} for bills</span><b style="color:${s.toChase>0?"var(--warn)":"var(--good)"}">${m2(s.toChase)}</b></div>
+    ${s.hers?`<div><span>${esc(NAMES.grace)}'s own bills</span><b>${m2(s.hers)}</b></div>`:""}
+    ${s.spend?`<div><span>Spending reload</span><b>${m2(s.spend)}</b></div>`:""}
+    <div class="strong"><span>Left for ${esc(lb.save)}</span><b style="color:${s.toSave<0?"var(--bad)":"var(--good)"}">${m2(s.toSave)}</b></div>
+  </div>
+  ${s.due.items.length?`<div class="small muted">${s.due.items.map(x=>`${esc(x.name)} ${short(x.due)} ${m0(x.amt)}`).join(" · ")}</div>`:""}
+  ${s.toChase===0&&s.due.sum>0?`<div class="small muted">${esc(lb.bills)} already has enough for these bills.</div>`:""}`;
+}
+document.addEventListener("input",e=>{if(["if-amt","if-src","if-date"].includes(e.target.id)){const el=document.getElementById("if-preview");if(el)el.innerHTML=incomePreviewHtml()}});
+document.addEventListener("change",e=>{if(["if-src","if-date"].includes(e.target.id)){const el=document.getElementById("if-preview");if(el)el.innerHTML=incomePreviewHtml()}});
+
 function incomeCard(){
   const P=S.plan,list=[...(P.income||[])].sort((a,b)=>b.date<a.date?-1:1);
   const t=new Date(),mk=`${t.getFullYear()}-${pad(t.getMonth()+1)}`;
@@ -610,7 +651,7 @@ function incomeCard(){
   const goals=P.goals||[];
   const lastCheck=list.find(x=>x.src==="mine");
   let split="";
-  if(lastCheck){const c=compute(),phase=P.postClosing?"post":"pre",perCheck=billTotal(phase)*12/26,spend=POOLS.reduce((s,p)=>s+c[p].budget,0)*2,rest=lastCheck.amt-perCheck-spend;
+  if(lastCheck&&!lastCheck.applied){const c=compute(),phase=P.postClosing?"post":"pre",perCheck=billTotal(phase)*12/26,spend=POOLS.reduce((s,p)=>s+c[p].budget,0)*perCheckFactor(),rest=lastCheck.amt-perCheck-spend;
     split=`<div class="split" style="margin-top:10px"><span class="label" style="grid-column:1/-1">Split for your ${short(dn(lastCheck.date))} check (${m2(lastCheck.amt)})</span>
       <span>${esc(L().bills)} for bills</span><b class="num">${m2(perCheck)}</b>
       <span>Spending reload (2 weeks)</span><b class="num">${m2(spend)}</b>
@@ -622,7 +663,8 @@ function incomeCard(){
       <div class="row"><label class="f">Date<input type="date" id="if-date" value="${todayS()}"></label>
         <label class="f">Put it toward<select id="if-to"><option value="">Normal split</option>${goals.map((g,i)=>g.done?"":`<option value="${i}">${esc(g.name)}</option>`).join("")}</select></label></div>
       <label class="f">Note<input id="if-note" placeholder="Sept 25 check, 42 OT hours"></label>
-      <label class="check small"><input type="checkbox" id="if-bal" checked> Add it to my account balances (your check: bills portion to ${esc(L().bills)}, the rest after spending to ${esc(L().save)})</label>
+      <div id="if-preview">${incomePreviewHtml()}</div>
+      <label class="check small"><input type="checkbox" id="if-bal" checked> Add it to my account balances this way</label>
       <button class="btn" type="submit">Add income</button>
     </form>
     ${split}
@@ -663,7 +705,7 @@ function vaultTab(){
     </div>
 
     <div class="card"><h2>Splurge money</h2>
-      <div class="small muted">Weekly money that wasn't spent rolls in here. Only you can move it; ${esc(NAMES.grace)} just sees her amount.</div>
+      <div class="small muted">Money that wasn't spent rolls in here. Only you can move it; ${esc(NAMES.grace)} just sees her amount.</div>
       ${cush.map(x=>`<div class="acct"><span>${esc(NAMES[x.p])}</span><b class="num" style="color:${x.v<0?"var(--bad)":"inherit"}">${m2(x.v)}</b>
         ${x.v>0?`<button class="btn sm ghost" data-act="splurge" data-p="${x.p}">Move to spending</button>`:"<span></span>"}</div>`).join("")}
       <div class="kv tot"><span><b>Total splurge money</b></span><b>${m2(cushTot)}</b></div>
@@ -740,8 +782,8 @@ function runAutopay(){
 function runScenario(amt,pool){
   const c=compute(),steps=[];let need=amt;
   const take=(label,avail,ep)=>{if(need<=0.004||!(avail>0))return;const x=Math.min(need,avail);steps.push({label,x,ep});need-=x};
-  if(pool!=="none"){take(`${NAMES[pool]} this week`,c[pool].left,null);take(`${NAMES[pool]}'s cushion`,c[pool].cushion,`cushion:${pool}`)}
-  if(pool!=="extras"){take(`${NAMES.extras} this week`,c.extras.left,"week:extras");take(`${NAMES.extras} cushion`,c.extras.cushion,"cushion:extras")}
+  if(pool!=="none"){take(`${NAMES[pool]} ${PER().this}`,c[pool].left,null);take(`${NAMES[pool]}'s cushion`,c[pool].cushion,`cushion:${pool}`)}
+  if(pool!=="extras"){take(`${NAMES.extras} ${PER().this}`,c.extras.left,"week:extras");take(`${NAMES.extras} cushion`,c.extras.cushion,"cushion:extras")}
   for(const q of POOLS)if(q!==pool&&q!=="extras")take(`${NAMES[q]}'s cushion`,c[q].cushion,`cushion:${q}`);
   if(S.plan){const P=S.plan,bal=+P.accounts?.usaa||0,inB=(P.goals||[]).filter(g=>!g.done).reduce((s,g)=>s+(+g.saved||0),0);
     take(`${L().save}, unassigned and above the floor`,Math.max(0,bal-Math.max(+P.floor||0,0)-inB),"usaa")}
@@ -810,7 +852,7 @@ function budgetsDetail(){
       ${tx.length?`<details><summary class="small"><b>See each purchase</b></summary><div class="list">${tx.map(t=>`<div class="item"><div class="grow"><div>${esc(t.note||"Purchase")}</div><div class="muted small">${short(dn(t.date))}</div></div><b class="num">${m2(t.amount)}</b>${t.receipt&&t.mine?`<button class="x" data-act="rview" data-path="${esc(t.receipt)}">Receipt</button>`:""}</div>`).join("")}</div></details>`:`<div class="small muted">Nothing spent yet.</div>`}
     </div>`}).join("")}
     ${log.length?`<div class="bd"><b>Paid from savings buckets</b><div class="list">${log.slice(0,20).map(x=>`<div class="item"><div class="grow"><div>${esc(x.note||x.goal)}</div><div class="muted small">${esc(x.goal)} · ${short(dn(x.date))}</div></div><b class="num">${m2(x.amt)}</b></div>`).join("")}</div></div>`:""}
-    <div class="small muted">Add or close these on the Special tab. Log spending from the bottom of the Week tab.</div>
+    <div class="small muted">Add or close these on the Special tab. Log spending from the bottom of the Home tab.</div>
   </div>`;
 }
 
@@ -822,7 +864,7 @@ function planTab(){
   const weekly=POOLS.reduce((s,p)=>s+c[p].budget,0);
   const bills=billTotal(phase);
   const perCheck=bills*12/26;
-  const spend=weekly*2;
+  const spend=weekly*perCheckFactor();
   const check=+P.paycheck?.aspen||0;
   const toSave=check-perCheck-spend;
   const gNet=(+P.paycheck?.grace||0)-(+P.paycheck?.graceBills||0)*12/26;
@@ -851,7 +893,7 @@ function namesForm(first){
   const n=S.settings?.names||{},c=first?null:compute();
   const val=(p,d)=>first?d:c[p].budget;
   return `<form class="card" id="setupf"><h2>${first?"Set up your budget":"Names and budgets"}</h2>
-    ${first?`<div class="small">Name the people and weekly budgets. You can change all of it later in Setup.</div>`:""}
+    ${first?`<div class="small">Name the people, pick how often your budget refills, and set the amounts. You can change all of it later in Setup.</div>`:""}
     <label class="f">Budget name<input id="su-title" value="${esc(S.settings?.title||"Family Budget")}"></label>
     <div class="row">
       <label class="f">Your name<input id="su-aspen" value="${esc(n.aspen||"")}" placeholder="Alex"></label>
@@ -859,33 +901,55 @@ function namesForm(first){
     <div class="row">
       <label class="f">Shared card<input id="su-household" value="${esc(n.household||"Household")}"></label>
       <label class="f">Odds-and-ends pool<input id="su-extras" value="${esc(n.extras||"Extras")}"></label></div>
-    <div class="label" style="margin-top:4px">Weekly amounts</div>
+    ${first?`<label class="f">Budget refills<select id="su-period">${Object.entries(PERIOD).map(([k,v])=>`<option value="${k}">${v.label}</option>`).join("")}</select></label>`:""}
+    <div class="label" style="margin-top:4px">${first?"Amounts each period":`${PER().adj} amounts`}</div>
     <div class="row">${POOLS.map(p=>`<label class="f">${esc(first?{household:"Shared",aspen:"You",grace:"Partner",extras:"Extras"}[p]:NAMES[p])}<input id="bud-${p}" inputmode="decimal" value="${val(p,{household:300,aspen:150,grace:150,extras:25}[p])}"></label>`).join("")}</div>
-    ${first?`<label class="f">The week starts on<input type="date" id="su-anchor" value="${ds(lastFriday())}"></label>`:""}
+    ${first?`<label class="f">Start date<input type="date" id="su-anchor" value="${ds(lastFriday())}"></label>`:""}
     <button class="btn" type="submit">${first?"Start budgeting":"Save"}</button>
-    ${first?"":`<div class="muted small">New amounts start with the current week (${short(c.cw)}). Past weeks keep their amounts, so cushions stay right.</div>`}
+    ${first?"":`<div class="muted small">New amounts start with the current ${PER().noun} (${short(c.cw)}). Past ones keep their amounts, so cushions stay right.</div>`}
   </form>`;
 }
 function lastFriday(){const t=dn(todayS());const dow=new Date(t*DAY).getUTCDay();return t-((dow-5+7)%7)}
 
+/* ---------- choose weekly / every 2 weeks / monthly ---------- */
+function periodCard(){
+  const segs=periodSegs(),upcoming=segs[segs.length-1],nr=nextReset(),cur=kindAt(weekStarts().slice(-1)[0]);
+  const pending=dn(upcoming.from)>dn(todayS())&&upcoming.kind!==cur;
+  return `<div class="card"><h2>How often budgets refill</h2>
+    <div class="seg" role="group" aria-label="Budget period">${Object.entries(PERIOD).map(([k,v])=>`<button type="button" data-act="period" data-v="${k}" aria-pressed="${upcoming.kind===k}">${v.label}</button>`).join("")}</div>
+    <div class="small muted" style="margin-top:8px">${pending?`Switching to <b>${PERIOD[upcoming.kind].label.toLowerCase()}</b> on ${esc(pretty(dn(upcoming.from)))}. Amounts were converted; check them in Names and budgets after that date.`
+      :`Right now: ${PERIOD[cur].label.toLowerCase()}. Next refill ${esc(pretty(nr))}. ${cur==="month"?"Monthly budgets refill on the 1st.":""} Changing it starts at the next refill, and amounts convert for you (for example $100 a week becomes about $435 a month).`}</div></div>`;
+}
+async function setPeriod(kind){
+  const segsAll=periodSegs(),nr=nextReset(),before=nr-1,oldKind=kindAt(before),from=ds(nr);
+  let segs=segsAll.filter(g=>dn(g.from)<nr);if(!segs.length)segs=[{from:anchor(),kind:"week"}];
+  let hist=(S.settings?.history||[]).filter(x=>x.from!==from);
+  if(kind!==oldKind){segs=segs.concat([{from,kind}]);
+    const f=PERIOD[kind].days/PERIOD[oldKind].days,entry={from};
+    for(const p of POOLS){entry[p]=Math.round(budgetFor(p,before)*f)}hist.push(entry)}
+  await saveSettings({periods:segs,history:hist});
+  toast(kind===oldKind?"Kept as is":`Switches to ${PERIOD[kind].label.toLowerCase()} on ${pretty(nr)}`);
+}
+
 function setupTab(){
   return `<section>
+    ${periodCard()}
     ${namesForm(false)}
     <div class="card"><h2>Extra categories</h2>
-      <div class="small muted">Add weekly categories like Pets, Gas or Eating out. Each gets its own limit and cushion, and resets with the week.</div>
+      <div class="small muted">Add categories like Pets, Gas or Eating out. Each gets its own limit and cushion, and resets with the ${PER().noun}.</div>
       ${customs().length?`<div class="list" style="margin-top:8px">${customs().map(c=>`<div class="item"><div class="grow"><div>${esc(c.name)}</div>
-        <div class="muted small">${m0(compute()[c.id].budget)}/week · ${c.shared?`${esc(NAMES.grace)} sees it`:"Only you"}</div></div>
+        <div class="muted small">${m0(compute()[c.id].budget)}/${PER().per} · ${c.shared?`${esc(NAMES.grace)} sees it`:"Only you"}</div></div>
         <button class="btn sm ghost" data-act="catshare" data-id="${esc(c.id)}">${c.shared?"Hide from "+esc(NAMES.grace):"Share with "+esc(NAMES.grace)}</button>
         <button class="x" data-act="catdel" data-id="${esc(c.id)}">Remove</button></div>`).join("")}</div>`:""}
       <form class="form" id="catf" style="margin-top:10px"><div class="row">
         <label class="f">Category<input id="cf-name" placeholder="Pets" autocomplete="off"></label>
-        <label class="f">Per week<input id="cf-amt" inputmode="decimal" placeholder="50"></label></div>
+        <label class="f">Per ${PER().per}<input id="cf-amt" inputmode="decimal" placeholder="50"></label></div>
         <label class="check"><input type="checkbox" id="cf-shared" checked> ${esc(NAMES.grace)} can see and log to it</label>
         <button class="btn ghost" type="submit">Add category</button>
-        <div class="muted small">To split money out of an existing card, lower that card's weekly amount above so your total stays the same.</div></form>
+        <div class="muted small">To split money out of an existing card, lower that card's amount above so your total stays the same.</div></form>
     </div>
     <div class="card"><h2>${esc(NAMES.grace)}'s view</h2>
-      <div class="small">When ${esc(NAMES.grace)} opens this page she sees only her weekly number, the ${esc(NAMES.household.toLowerCase())} number, her saved money, open special budgets and a place to log purchases. Bills, balances, debts and the plan are stored so only you can read them.</div>
+      <div class="small">When ${esc(NAMES.grace)} opens this page she sees only her own number, the ${esc(NAMES.household.toLowerCase())} number, her saved money, open special budgets and a place to log purchases. Bills, balances, debts and the plan are stored so only you can read them.</div>
       <button class="btn ghost" data-act="view" data-v="grace" style="margin-top:10px">Preview ${esc(NAMES.grace)}'s view</button>
     </div>
     ${S.owner?`<div class="card"><h2>What ${esc(NAMES.grace)} can see</h2><div class="seg" role="group" aria-label="Partner access">
@@ -896,7 +960,7 @@ function setupTab(){
       <div class="num" style="font-size:28px;font-weight:700;letter-spacing:.12em;margin-top:8px;user-select:all">${esc(S.joinCode)}</div></div>`:""}
     <div class="card"><h2>Look</h2><div class="seg" role="group" aria-label="Color mode">
       ${[["light","Light"],["dark","Dark"],["auto","Match phone"]].map(([k,l])=>`<button type="button" data-act="theme" data-v="${k}" aria-pressed="${getTheme()===k}">${l}</button>`).join("")}</div></div>
-    <div class="card"><h2>This phone</h2><div class="small muted">Get what's left every night at 7 PM, and the reload amounts the night before the week resets.</div>
+    <div class="card"><h2>This phone</h2><div class="small muted">Get what's left every night at 7 PM, and the reload amounts the night before it resets.</div>
       <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">${pushButton()}<button class="btn ghost" data-act="signout">Sign out</button></div></div>
     ${accountCard()}
     ${S.plan?`<form class="card" id="labelf"><h2>Account names</h2>
@@ -915,7 +979,7 @@ function firstRun(){
 function setPath(obj,path,val){const k=path.split(".");let o=obj;for(let i=0;i<k.length-1;i++){o=o[k[i]]??(o[k[i]]={})}o[k[k.length-1]]=val}
 let planQ=Promise.resolve();
 function savePlan(){const body=JSON.parse(JSON.stringify(S.plan));planQ=planQ.then(()=>db.doc("private/plan").set(body)).catch(fail);return planQ}
-async function saveSettings(patch){const cur=S.settings||{};const body={anchor:cur.anchor||anchor(),history:cur.history||[],starts:cur.starts||[],names:cur.names||{},title:cur.title||"",custom:cur.custom||[],onboardDone:!!cur.onboardDone,partnerFull:!!cur.partnerFull,...patch};
+async function saveSettings(patch){const cur=S.settings||{};const body={anchor:cur.anchor||anchor(),history:cur.history||[],starts:cur.starts||[],names:cur.names||{},title:cur.title||"",custom:cur.custom||[],periods:cur.periods||[{from:cur.anchor||anchor(),kind:"week"}],onboardDone:!!cur.onboardDone,partnerFull:!!cur.partnerFull,...patch};
   await db.doc("settings/budget").set(JSON.parse(JSON.stringify(body)))}
 function arm(b,label){if(b.classList.contains("armed"))return true;b.classList.add("armed");b.dataset.t0=b.textContent;b.textContent=label||"Tap again";setTimeout(()=>{b.classList.remove("armed");b.textContent=b.dataset.t0},3500);return false}
 
@@ -937,9 +1001,9 @@ document.addEventListener("click",async e=>{
   if(a==="tab"){S.tab=b.dataset.t;try{localStorage.setItem("mfb-tab",S.tab)}catch(_){}render();return}
   if(a==="view"){S.view=b.dataset.v;render();window.scrollTo(0,0);return}
   if(a==="pool"){e.preventDefault();if(S.view==="grace")S.gPool=b.dataset.p;else S.aPool=b.dataset.p;render();document.getElementById("lf-amt")?.focus();return}
-  if(a==="newweek"){if(!arm(b,"Tap again to start the new week"))return;
+  if(a==="newweek"){if(!arm(b,`Tap again to start a new ${PER().noun}`))return;
     const t=todayS(),starts=[...(S.settings?.starts||[])].filter(x=>x!==t);starts.push(t);
-    try{await saveSettings({starts});toast("New week started. Leftovers moved to cushions.")}catch(err){fail(err)}
+    try{await saveSettings({starts});toast(`New ${PER().noun} started. Leftovers moved to cushions.`)}catch(err){fail(err)}
     return}
   if(a==="deltx"||a==="delmv"||a==="delbill"||a==="deldebt"){if(!arm(b))return;
     if(a==="deltx")db.doc("txns/"+b.dataset.id).delete().then(()=>toast("Deleted")).catch(fail);
@@ -958,6 +1022,7 @@ document.addEventListener("click",async e=>{
   if(a==="delacct"){if(!arm(b))return;S.plan.otherAccts.splice(+b.dataset.i,1);render();savePlan();return}
   if(a==="addroute"){(S.plan.routing||(S.plan.routing=[])).push({name:"New line",amt:0});render();savePlan();return}
   if(a==="delroute"){S.plan.routing.splice(+b.dataset.i,1);render();savePlan();return}
+  if(a==="period"){try{await setPeriod(b.dataset.v)}catch(err){fail(err)}return}
   if(a==="theme"){setTheme(b.dataset.v);render();return}
   if(a==="gopen"){const i=+b.dataset.i;S.openGoal=S.openGoal===i?null:i;render();return}
   if(a==="gdone2"){const g=S.plan.goals[+b.dataset.i];g.done=!g.done;S.openGoal=null;render();savePlan();return}
@@ -1024,13 +1089,14 @@ document.addEventListener("submit",async e=>{
     const first=!S.settings;
     const names={aspen:val("su-aspen").trim()||"Me",grace:val("su-grace").trim()||"Partner",household:val("su-household").trim()||"Household",extras:val("su-extras").trim()||"Extras"};
     const anc=first?(val("su-anchor")||ds(lastFriday())):anchor();
+    const periods=first?[{from:anc,kind:val("su-period")||"week"}]:(S.settings?.periods||undefined);
     const from=first?anc:ds(compute().cw);const entry={from};
-    for(const p of POOLS){const v=num(val("bud-"+p));if(!(v>=0)){toast("Check the weekly amounts");return}entry[p]=v}
+    for(const p of POOLS){const v=num(val("bud-"+p));if(!(v>=0)){toast("Check the amounts");return}entry[p]=v}
     const hist=(S.settings?.history||[]).filter(h=>h.from!==from);hist.push(entry);
-    try{await saveSettings({anchor:anc,history:hist,names,title:val("su-title").trim().slice(0,40)||"Family Budget"});toast(first?"You're set up":"Saved")}catch(err){fail(err)}
+    try{await saveSettings({anchor:anc,history:hist,names,title:val("su-title").trim().slice(0,40)||"Family Budget",...(periods?{periods}:{})});toast(first?"You're set up":"Saved")}catch(err){fail(err)}
   }
   if(f.id==="catf"){const name=val("cf-name").trim().slice(0,30),amt=num(val("cf-amt"));
-    if(!name||!(amt>=0)){toast("Add a name and weekly amount");return}
+    if(!name||!(amt>=0)){toast("Add a name and an amount");return}
     const id="c"+Date.now().toString(36);const c=compute(),from=ds(c.cw),entry={from};for(const p of POOLS)entry[p]=c[p].budget;entry[id]=amt;
     const custom=(S.settings.custom||[]).concat([{id,name,shared:!!document.getElementById("cf-shared")?.checked}]);
     try{await saveSettings({custom,history:(S.settings.history||[]).filter(x=>x.from!==from).concat([entry])});toast(`${name} added`);f.reset()}catch(err){fail(err)}}
@@ -1042,9 +1108,7 @@ document.addEventListener("submit",async e=>{
   if(f.id==="incf"){const amt=num(val("if-amt"));if(!(amt>0)){toast("Enter the amount");return}
     const to=val("if-to");const inc={id:Date.now(),src:val("if-src"),amt,date:val("if-date")||todayS(),note:val("if-note").trim().slice(0,80),to:to===""?"":+to};
     if(document.getElementById("if-bal")?.checked){const P=S.plan,c=compute(),phase=P.postClosing?"post":"pre";let ch=0,sv=0;
-      if(inc.src==="mine"&&inc.to===""){ch=Math.round(billTotal(phase)*12/26*100)/100;sv=amt-ch-POOLS.reduce((s,p)=>s+c[p].budget,0)*2}
-      else if(inc.src==="partner"){sv=amt-(+P.paycheck?.graceBills||0)*12/26}
-      else sv=amt;
+      const sp=incomeSplit(amt,inc.src,inc.date);ch=sp.toChase;sv=inc.to===""?sp.toSave:amt-ch;
       sv=Math.round(sv*100)/100;acctAdjust("chase",ch);acctAdjust("usaa",sv);inc.applied={chase:ch,usaa:sv}}
     (S.plan.income||(S.plan.income=[])).push(inc);S.plan.income=S.plan.income.slice(-200);
     if(inc.to!==""&&S.plan.goals?.[inc.to]){const g=S.plan.goals[inc.to];g.saved=Math.round(((+g.saved||0)+amt)*100)/100}
@@ -1084,7 +1148,7 @@ function reloadCard(c){
   const rows=POOLS.map(p=>({p,add:budgetFor(p,n),left:c[p].left,cush:c[p].cushion}));
   const totalAdd=rows.reduce((s,r)=>s+r.add,0),totalLeft=rows.reduce((s,r)=>s+r.left,0);
   return `<div class="card"><h2>Reload ${esc(pretty(n))}</h2>
-    <div class="small muted">Add these amounts when the week resets. Whatever is left now becomes cushion, so it isn't lost.</div>
+    <div class="small muted">Add these amounts when it resets. Whatever is left now becomes cushion, so it isn't lost.</div>
     <div class="reload">${rows.map(r=>`<div class="rl">
       <div class="rl-name">${esc(NAMES[r.p])}</div>
       <div><div class="label">Add</div><b class="num">${m0(r.add)}</b></div>
@@ -1235,7 +1299,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202609300812";
+const BUILD="202609300817";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
@@ -1261,7 +1325,7 @@ function loginView(mode){
     <div class="card" style="text-align:left"><b>How it works</b><ol class="howto">
       <li>One of you starts the budget and manages it.</li>
       <li>The other joins with a code and gets a simple screen with just their money.</li>
-      <li>Every week each card refills. What's left rolls into savings you can splurge with.</li></ol></div>
+      <li>Every week, every 2 weeks, or every month (you pick) each card refills. What's left rolls into savings you can splurge with.</li></ol></div>
     <form class="card" id="signupf">
       <label class="f">Email<input type="email" id="se" autocomplete="username" required></label>
       <label class="f">Password (6+ characters)<input type="password" id="sp" autocomplete="new-password" minlength="6" required></label>

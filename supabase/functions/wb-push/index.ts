@@ -43,11 +43,16 @@ function overall(out: any, pools: string[], frac: number) {
 // deno-lint-ignore no-explicit-any
 function summarize(settings: any, txns: any[], moves: any[], events: any[], today: string) {
   const t = dn(today), a = dn(settings.anchor || today);
-  const man = (settings.starts || []).map(dn).filter((x: number) => x > a).sort((x: number, y: number) => x - y);
+  // deno-lint-ignore no-explicit-any
+  const segs: any[] = settings.periods?.length ? settings.periods : [{ from: settings.anchor || today, kind: "week" }];
+  const kindAt = (x: number) => { let k = segs[0].kind; for (const g of segs) if (dn(g.from) <= x) k = g.kind; return k; };
+  const nextAfter = (x: number) => { const k = kindAt(x); if (k === "biweek") return x + 14; if (k === "month") { const d = new Date(x * DAY); return Math.round(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1) / DAY); } return x + 7; };
+  const man = [...(settings.starts || []), ...segs.slice(1).map((g) => g.from)].map(dn).filter((x: number) => x > a).sort((x: number, y: number) => x - y);
+  const step = (x: number) => { const nx = nextAfter(x); const m = man.find((y: number) => y > x && y < nx); return m !== undefined ? m : nx; };
   const L: number[] = []; let w = a;
-  while (w <= t) { L.push(w); let nx = w + 7; const m = man.find((x: number) => x > w && x < nx); if (m !== undefined) nx = m; w = nx; }
+  while (w <= t) { L.push(w); w = step(w); }
   if (!L.length) L.push(a);
-  const cw = L[L.length - 1], next = cw + 7;
+  const cw = L[L.length - 1], next = step(cw);
   const wk = (s: string) => { const n = dn(s); let r = L[0]; for (const x of L) { if (x <= n) r = x; else break; } return r; };
   const hist = [...(settings.history || [])].sort((x, y) => dn(x.from) - dn(y.from));
   const budgetFor = (p: string, wn: number) => { let b = 0; for (const e of hist) if (dn(e.from) <= wn) b = +e[p] || 0; return b; };
@@ -124,7 +129,7 @@ Deno.serve(async (req) => {
     const label = (p: string) => (p === (isOwner ? "aspen" : "grace") ? "My Money" : names[p]);
     let title: string, body: string;
     if (resetTomorrow) {
-      title = "Friday reload tomorrow";
+      title = "Budgets refill tomorrow";
       body = pools.map((p) => `${label(p)}: add ${money(out[p].nextBudget)} · ${money(out[p].left)} left → cushion`).join("\n");
     } else {
       title = `${overall(out, pools, frac)} Tomorrow’s starting balance`;
