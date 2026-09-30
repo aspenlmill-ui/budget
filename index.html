@@ -1258,7 +1258,11 @@ document.addEventListener("click",async e=>{
   if(a==="varcancel"){S.varOpen=null;render();return}
   if(a==="billauto"){const bl=S.plan.bills[+b.dataset.i];bl.auto=b.checked;render();savePlan();return}
   if(a==="splurge"){S.mvFrom=`cushion:${b.dataset.p}`;S.mvTo=`week:${b.dataset.p}`;S.tab="move";render();window.scrollTo(0,0);document.getElementById("mv-amt")?.focus();return}
-  if(a==="delacct"){if(!arm(b))return;S.plan.otherAccts.splice(+b.dataset.i,1);render();savePlan();return}
+  if(a==="delacct"){const P=S.plan,ac=P.otherAccts[+b.dataset.i],k="x:"+ac?.id;
+    const users=[...(P.bills||[]).filter(x=>x.from===k).map(x=>x.name),...Object.entries(P.cardAcct||{}).filter(([,v])=>v===k).map(([c])=>c==="events"?"Special budgets":NAMES[c]),
+      ...(P.refillFrom===k?["Refills"]:[]),...(P.splurgeAcct===k?["Splurge money"]:[]),...Object.values(P.deposit||{}).some(r=>r.home===k||(r.splits||[]).some(x=>x.to===k))?["Where paychecks go"]:[]];
+    if(users.length){toast(`${ac.name} is used by ${users.slice(0,4).join(", ")}${users.length>4?"…":""}. Change those first. To fix the balance, just type the new number in its box.`);return}
+    if(!arm(b))return;P.otherAccts.splice(+b.dataset.i,1);render();savePlan();return}
   if(a==="addroute"){(S.plan.routing||(S.plan.routing=[])).push({name:"New line",amt:0});render();savePlan();return}
   if(a==="delroute"){S.plan.routing.splice(+b.dataset.i,1);render();savePlan();return}
   if(a==="period"){try{await setPeriod(b.dataset.v)}catch(err){fail(err)}return}
@@ -1419,7 +1423,8 @@ document.addEventListener("submit",async e=>{
     g.name=name;g.target=num(val("ge-target"))||0;g.monthly=num(val("ge-monthly"))||0;const sv=num(val("ge-saved"));if(isFinite(sv))g.saved=sv;g.when=val("ge-when").trim();
     S.editGoal=null;render();savePlan();toast("Saved")}
   if(f.id==="acctf"){const name=val("ac-name").trim(),bal=num(val("ac-bal"));if(!name){toast("Name the account");return}
-    (S.plan.otherAccts||(S.plan.otherAccts=[])).push({name,bal:isFinite(bal)?bal:0});render();savePlan()}
+    const id="a"+Math.random().toString(36).slice(2,8);(S.plan.otherAccts||(S.plan.otherAccts=[])).push({id,name,bal:isFinite(bal)?bal:0});
+    S.plan.acctAsOf={...(S.plan.acctAsOf||{}),["x:"+id]:Date.now()};render();savePlan()}
   if(f.id==="labelf"){S.plan.labels={save:val("lb-save").trim()||"Savings",bills:val("lb-bills").trim()||"Bills account"};if(val("lb-pay"))S.plan.payAnchor=val("lb-pay");render();savePlan();toast("Saved")}
   if(f.id==="evf"){
     const name=val("ev-name").trim().slice(0,40),amt=num(val("ev-amt"));
@@ -1644,7 +1649,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202609301851";
+const BUILD="202609301857";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
