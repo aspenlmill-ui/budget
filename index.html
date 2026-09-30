@@ -440,6 +440,7 @@ function onboardSteps(){
   return [
     ["bills","Add your bills","Bills tab → Add a bill. Say if it varies, if it autopays, and when it's due.",(P.bills||[]).length>0,"bills"],
     ["balances","Enter your bank balances","Vault tab → Accounts. Type what's in each account today.",(+P.accounts?.usaa||0)+(+P.accounts?.chase||0)>0,"vault"],
+    ["deposit","Set where paychecks go","Plan tab → Where paychecks go. Pick each paycheck's account and any automatic amounts.",!!P.deposit,"plan"],
     ["buckets","Set what you're saving for","Vault tab → What we're saving for. Rename or add buckets.",!!ob.buckets,"vault"],
     ["partner",`Invite ${NAMES.grace}`,`Setup tab shows your join code. ${NAMES.grace} makes an account and picks "Join your partner".`,!!ob.partner,"setup"],
     ["home","Add the app to your Home Screen","In Safari tap Share → Add to Home Screen, then open it from there.",!!ob.home||matchMedia("(display-mode: standalone)").matches||!!navigator.standalone,null],
@@ -678,20 +679,20 @@ function incomeSplit(amt,src,dateS){
 function incomePreviewHtml(){
   const amt=num(val("if-amt")),src=val("if-src")||"mine";
   if(!(amt>0))return `<div class="small muted">Type the amount to see how much has to go to bills.</div>`;
-  const s=incomeSplit(amt,src,val("if-date")),lb=L();
+  const goal=val("if-to")!=="",s=depositPlan(amt,src,val("if-date"),goal),lb=L();
   return `<div class="ledger">
     <div><span>${esc(lb.bills)} bills due by ${short(s.end)}</span><b>${m2(s.due.sum)}</b></div>
     <div><span class="muted">${esc(lb.bills)} has now</span><b class="muted">${m2(s.chase)}</b></div>
-    <div class="strong"><span>Put in ${esc(lb.bills)} for bills</span><b style="color:${s.toChase>0?"var(--warn)":"var(--good)"}">${m2(s.toChase)}</b></div>
-    ${s.hers?`<div><span>${esc(NAMES.grace)}'s own bills</span><b>${m2(s.hers)}</b></div>`:""}
-    ${s.spend?`<div><span>Spending reload</span><b>${m2(s.spend)}</b></div>`:""}
-    <div class="strong"><span>Left for ${esc(lb.save)}</span><b style="color:${s.toSave<0?"var(--bad)":"var(--good)"}">${m2(s.toSave)}</b></div>
+    ${s.auto.map(x=>`<div><span>Automatic: ${esc(acctName(x.to))}</span><b>${m2(x.amt)}</b></div>`).join("")}
+    ${s.spend?`<div><span>Spending refill</span><b>${m2(s.spend)}</b></div>`:""}
+    ${Object.entries(s.out).filter(([,v])=>v>0).map(([k,v])=>`<div class="strong"><span>Ends up in ${esc(acctName(k))}</span><b style="color:var(--good)">${m2(v)}</b></div>`).join("")}
   </div>
+  ${s.move>0?`<div class="small muted">Includes ${m2(s.move)} moved to ${esc(lb.bills)} so it covers bills due by ${short(s.end)}.</div>`:""}
   ${s.due.items.length?`<div class="small muted">${s.due.items.map(x=>`${esc(x.name)} ${short(x.due)} ${m0(x.amt)}`).join(" · ")}</div>`:""}
-  ${s.toChase===0&&s.due.sum>0?`<div class="small muted">${esc(lb.bills)} already has enough for these bills.</div>`:""}`;
+  <div class="small muted">Change where this goes in <b>Where paychecks go</b> below.</div>`;
 }
 document.addEventListener("input",e=>{if(["if-amt","if-src","if-date"].includes(e.target.id)){const el=document.getElementById("if-preview");if(el)el.innerHTML=incomePreviewHtml()}});
-document.addEventListener("change",e=>{if(["if-src","if-date"].includes(e.target.id)){const el=document.getElementById("if-preview");if(el)el.innerHTML=incomePreviewHtml()}});
+document.addEventListener("change",e=>{if(["if-src","if-date","if-to"].includes(e.target.id)){const el=document.getElementById("if-preview");if(el)el.innerHTML=incomePreviewHtml()}});
 
 function incomeCard(){
   const P=S.plan,list=[...(P.income||[])].sort((a,b)=>b.date<a.date?-1:1);
@@ -726,7 +727,44 @@ function incomeCard(){
 }
 
 /* ---------- money vault ---------- */
-function acctAdjust(which,delta){const P=S.plan;P.accounts=P.accounts||{};P.accounts[which]=Math.round(((+P.accounts[which]||0)+delta)*100)/100}
+function acctAdjust(which,delta){const P=S.plan;const r=v=>Math.round(v*100)/100;
+  if(String(which).startsWith("x:")){const a=(P.otherAccts||[]).find(x=>x.id===which.slice(2));if(a)a.bal=r((+a.bal||0)+delta);return}
+  P.accounts=P.accounts||{};P.accounts[which]=r((+P.accounts[which]||0)+delta)}
+function acctList(){const P=S.plan||{},lb=L();return [{k:"usaa",name:lb.save},{k:"chase",name:lb.bills},...(P.otherAccts||[]).map(a=>{if(!a.id)a.id="a"+Math.random().toString(36).slice(2,8);return {k:"x:"+a.id,name:a.name}})]}
+function acctName(k){return acctList().find(a=>a.k===k)?.name||"Account"}
+function acctOpts(sel){return acctList().map(a=>`<option value="${esc(a.k)}" ${a.k===sel?"selected":""}>${esc(a.name)}</option>`).join("")}
+
+/* ---------- where each kind of paycheck lands, and automatic amounts to other accounts ---------- */
+function depRule(src){const d={home:"usaa",cover:src!=="partner",spend:src==="mine",splits:[]};return {...d,...(S.plan?.deposit?.[src]||{})}}
+function depRuleSet(src){const P=S.plan;P.deposit=P.deposit||{};return P.deposit[src]=P.deposit[src]||depRule(src)}
+function depositPlan(amt,src,dateS,goal){
+  const P=S.plan,r=depRule(src),c=compute(),out={},add=(k,v)=>{if(v)out[k]=Math.round(((out[k]||0)+v)*100)/100};
+  let left=amt;const auto=[];
+  for(const x of r.splits||[]){const v=Math.min(left,Math.max(0,+x.amt||0));if(v>0){add(x.to,v);auto.push({to:x.to,amt:v});left-=v}}
+  const spend=r.spend&&!goal?Math.min(left,Math.round(POOLS.reduce((s,p)=>s+c[p].budget,0)*perCheckFactor()*100)/100):0;left-=spend;
+  add(r.home,left);
+  const d=dn(dateS||todayS()),end=Math.max(d,dn(todayS()))+14,due=chaseDueUntil(end),chase=+P.accounts?.chase||0;
+  let move=0;if(r.cover&&r.home!=="chase"){const short=Math.max(0,due.sum-chase-(out.chase||0));move=Math.min(short,out[r.home]||0);if(move>0){add(r.home,-move);add("chase",move)}}
+  return {out,auto,spend,move,due,chase,end,rule:r};
+}
+function depositCard(){
+  const src=S.depSrc||"mine",r=depRule(src),lb=L();
+  return `<div class="card"><h2>Where paychecks go</h2>
+    <div class="small muted">Pick where each kind of money lands, and any amounts that go somewhere else automatically (like a direct-deposit split). Logging money updates the balances this way.</div>
+    <label class="f" style="margin-top:8px">Money coming in<select id="dep-src">${incomeSources().map(([k,l])=>`<option value="${k}" ${k===src?"selected":""}>${esc(l)}</option>`).join("")}</select></label>
+    <div class="label" style="margin-top:10px">Automatic amounts first</div>
+    ${(r.splits||[]).length?`<div class="list">${r.splits.map((x,i)=>`<div class="item" style="gap:8px;flex-wrap:wrap">
+      <input data-dep="amt" data-i="${i}" inputmode="decimal" value="${esc(x.amt)}" style="width:96px" aria-label="Amount">
+      <span class="small muted">goes to</span><select data-dep="to" data-i="${i}" style="flex:1;min-width:120px" aria-label="Account">${acctOpts(x.to)}</select>
+      <button class="x" data-act="depdel" data-i="${i}" aria-label="Remove">✕</button></div>`).join("")}</div>`:`<div class="small muted">None. The whole amount goes to one account.</div>`}
+    <button class="btn ghost sm" data-act="depadd" style="margin-top:6px">Add an automatic amount</button>
+    <label class="f" style="margin-top:10px">Everything else goes to<select data-dep="home">${acctOpts(r.home)}</select></label>
+    ${r.home!=="chase"?`<label class="check small"><input type="checkbox" data-dep="cover" ${r.cover?"checked":""}> Move what ${esc(lb.bills)} needs for upcoming bills</label>`:""}
+    <label class="check small"><input type="checkbox" data-dep="spend" ${r.spend?"checked":""}> Take out the spending refill for the cards</label>
+    <div class="small muted" style="margin-top:6px">Example with $1,000: ${esc(depositSummary(1000,src))}</div>
+  </div>`;
+}
+function depositSummary(amt,src){const d=depositPlan(amt,src);const parts=Object.entries(d.out).filter(([,v])=>v>0).map(([k,v])=>`${m0(v)} to ${acctName(k)}`);if(d.spend)parts.push(`${m0(d.spend)} spending refill`);return parts.join(", ")||"nothing"}
 function billAcct(b){return b.from==="savings"?"usaa":"chase"}
 function vaultTab(){
   const P=S.plan;if(!P)return planTab();
@@ -980,6 +1018,7 @@ function planTab(){
   const goals=P.goals||[];
   return `<section>
     ${incomeCard()}
+    ${depositCard()}
     ${budgetsDetail()}
 
     ${payPlanner(P,c,perCheck,spend,gNet,post)}
@@ -1114,6 +1153,8 @@ document.addEventListener("click",async e=>{
     if(a==="gsgo"){S.tab=b.dataset.t;window.scrollTo(0,0)}render();return}
   if(a==="hpref"){const g=b.dataset.g,k=b.dataset.k,on=b.dataset.v==="1";S.prefs=S.prefs||{};const h=S.prefs.home=S.prefs.home||{};
     const set=new Set(h[g]||[]);on?set.delete(k):set.add(k);h[g]=[...set];render();savePrefs();return}
+  if(a==="depadd"){const r=depRuleSet(S.depSrc||"mine");r.splits=[...(r.splits||[]),{to:acctList().find(x=>x.k!==r.home)?.k||"usaa",amt:0}];render();savePlan();return}
+  if(a==="depdel"){const r=depRuleSet(S.depSrc||"mine");r.splits.splice(+b.dataset.i,1);render();savePlan();return}
   if(a==="pshow"){const k=b.dataset.k,on=b.dataset.v==="1";
     try{if(k.startsWith("custom:")){const id=k.slice(7);await saveSettings({custom:(S.settings.custom||[]).map(c=>c.id===id?{...c,shared:on}:c)})}
       else{const h=new Set(S.settings?.partnerHide||[]);on?h.delete(k):h.add(k);await saveSettings({partnerHide:[...h]})}
@@ -1165,7 +1206,7 @@ document.addEventListener("click",async e=>{
   if(a==="gdel"){if(!arm(b,"Tap again to delete"))return;S.plan.goals.splice(+b.dataset.i,1);S.editGoal=null;render();savePlan();return}
   if(a==="delinc"){if(!arm(b))return;const inc=(S.plan.income||[]).find(x=>String(x.id)===b.dataset.id);if(!inc)return;
     if(inc.to!==""&&inc.to!=null&&S.plan.goals?.[inc.to]){const g=S.plan.goals[inc.to];g.saved=Math.round(((+g.saved||0)-inc.amt)*100)/100}
-    if(inc.applied){acctAdjust("chase",-(inc.applied.chase||0));acctAdjust("usaa",-(inc.applied.usaa||0))}
+    if(inc.applied)for(const [k,v] of Object.entries(inc.applied))acctAdjust(k,-(+v||0));
     S.plan.income=S.plan.income.filter(x=>x!==inc);render();savePlan();return}
   if(a==="gtake"){const i=+b.dataset.i;const v=num(document.getElementById("gadd-"+i).value);if(!(v>0)){toast("Enter an amount first");return}
     const g=S.plan.goals[i];g.saved=Math.round(((+g.saved||0)-v)*100)/100;render();savePlan();toast(`${m0(v)} taken out of ${g.name}`);return}
@@ -1211,6 +1252,11 @@ document.addEventListener("change",e=>{
     b.day=String(v);render();savePlan();toast(`${b.name} is now due the ${ordinal(v)}`);return}
   if(el.dataset.plan&&S.plan){const v=num(el.value);if(!isFinite(v)){toast("Enter a number");return}
     setPath(S.plan,el.dataset.plan,v);if(el.dataset.plan.startsWith("accounts.")||el.dataset.plan.startsWith("otherAccts."))S.plan.accounts.updated=todayS();render();savePlan()}
+  if(el.id==="dep-src"){S.depSrc=el.value;render();return}
+  if(el.dataset.dep&&S.plan){const r=depRuleSet(S.depSrc||"mine"),k=el.dataset.dep,i=+el.dataset.i;
+    if(k==="amt"){const v=num(el.value);if(!(v>=0)){toast("Enter a number");return}r.splits[i].amt=v}
+    else if(k==="to")r.splits[i].to=el.value;else if(k==="home")r.home=el.value;else r[k]=el.checked;
+    render();savePlan();const el2=document.getElementById("if-preview");if(el2)el2.innerHTML=incomePreviewHtml();return}
   if(el.dataset.route!=null&&S.plan){const r=S.plan.routing[+el.dataset.route];if(el.dataset.k==="amt"){const v=num(el.value);if(!isFinite(v)){toast("Enter a number");return}r.amt=v}else r.name=el.value.trim().slice(0,40)||"Line";render();savePlan();return}
   if(el.dataset.act==="billfrom"&&S.plan){S.plan.bills[+el.dataset.i].from=el.value;render();savePlan();return}
   if(el.id==="mv-from")S.mvFrom=el.value;if(el.id==="mv-to")S.mvTo=el.value;
@@ -1280,9 +1326,8 @@ document.addEventListener("submit",async e=>{
     S.payOpen=null;render();savePlan();toast("Marked paid")}
   if(f.id==="incf"){const amt=num(val("if-amt"));if(!(amt>0)){toast("Enter the amount");return}
     const to=val("if-to");const inc={id:Date.now(),src:val("if-src"),amt,date:val("if-date")||todayS(),note:val("if-note").trim().slice(0,80),to:to===""?"":+to};
-    if(document.getElementById("if-bal")?.checked){const P=S.plan,c=compute(),phase=P.postClosing?"post":"pre";let ch=0,sv=0;
-      const sp=incomeSplit(amt,inc.src,inc.date);ch=sp.toChase;sv=inc.to===""?sp.toSave:amt-ch;
-      sv=Math.round(sv*100)/100;acctAdjust("chase",ch);acctAdjust("usaa",sv);inc.applied={chase:ch,usaa:sv}}
+    if(document.getElementById("if-bal")?.checked){const d=depositPlan(amt,inc.src,inc.date,inc.to!=="");
+      for(const [k,v] of Object.entries(d.out))acctAdjust(k,v);inc.applied=d.out}
     (S.plan.income||(S.plan.income=[])).push(inc);S.plan.income=S.plan.income.slice(-200);
     if(inc.to!==""&&S.plan.goals?.[inc.to]){const g=S.plan.goals[inc.to];g.saved=Math.round(((+g.saved||0)+amt)*100)/100}
     render();savePlan();toast(`Added ${m2(amt)}`)}
@@ -1515,7 +1560,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202609301301";
+const BUILD="202609301318";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
