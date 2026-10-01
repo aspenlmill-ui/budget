@@ -299,6 +299,7 @@ function simpleView(me,self){
       <b class="num">-${m2(t.amount)}</b>${t.mine?`<button class="x" data-act="deltx" data-id="${esc(t.id)}" aria-label="Delete">✕</button>`:""}</div>`).join("")}</div>`
       :`<div class="muted small">Nothing yet.</div>`}
   </div>
+  ${self?reloadCard(c):""}
   ${self||S.owner?"":homeCustomCard(true)}
   ${pushButton()}
   <button class="btn ghost" data-act="signout">Sign out</button>
@@ -1554,6 +1555,7 @@ async function ocr(canvas){
 }
 async function logReceiptTxn(q){
   const row=chk(await sb.from("wb_txns").insert({household_id:HID,pool:q.pool,amount:q.total,src:"week",date:todayS()}).select("id").single());
+  pingAlerts();
   let receipt=null;
   if(q.blob){const path=`${ME}/${row.id}.jpg`;const up=await sb.storage.from("receipts").upload(path,q.blob,{contentType:"image/jpeg",upsert:true});if(!up.error)receipt=path}
   chk(await sb.from("wb_txn_notes").insert({txn_id:row.id,household_id:HID,shared:!["aspen","grace"].includes(q.pool),note:q.store||"Receipt",cat:null,receipt}));
@@ -1630,6 +1632,7 @@ db={
       let receipt=null;
       if(d.receiptBlob){const path=`${ME}/${row.id}.jpg`;const up=await sb.storage.from("receipts").upload(path,d.receiptBlob,{contentType:"image/jpeg",upsert:true});if(up.error)toast("Saved, but the receipt photo didn't upload");else receipt=path}
       if(d.note||d.cat||receipt)chk(await sb.from("wb_txn_notes").insert({txn_id:row.id,household_id:HID,shared:!["aspen","grace"].includes(d.pool),note:d.note||null,cat:d.cat||null,receipt}))}
+    if(c==="txns")pingAlerts();
     if(c==="moves")chk(await sb.from("wb_moves").insert({household_id:HID,from_ep:d.from,to_ep:d.to,amount:d.amount,reason:d.reason||null,date:d.date}));
     if(c==="events")chk(await sb.from("wb_events").insert({household_id:HID,name:d.name,budget:d.budget,active:true}));
     await LOAD[c]();render()}}}
@@ -1671,7 +1674,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202609301953";
+const BUILD="202610011904";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
@@ -1756,6 +1759,10 @@ document.addEventListener("click",async e=>{
 });
 
 /* ---------- notifications ---------- */
+// After a purchase, ask the notification service to check for Raptor alert / Extinction event right away.
+let pingT=null;
+function pingAlerts(){clearTimeout(pingT);pingT=setTimeout(async()=>{try{const {data}=await sb.auth.getSession();const t=data.session?.access_token;if(!t)return;
+  await fetch(SB_URL+"/functions/v1/wb-push?kind=alerts-now",{method:"POST",headers:{Authorization:"Bearer "+t,apikey:SB_KEY}})}catch(_){}},1500)}
 function b64(s){const p="=".repeat((4-s.length%4)%4);const r=atob((s+p).replace(/-/g,"+").replace(/_/g,"/"));return Uint8Array.from([...r].map(c=>c.charCodeAt(0)))}
 function myTZ(){try{return Intl.DateTimeFormat().resolvedOptions().timeZone||"America/New_York"}catch{return "America/New_York"}}
 async function syncTZ(){try{if(!("serviceWorker" in navigator))return;const reg=await navigator.serviceWorker.getRegistration();const sub=await reg?.pushManager?.getSubscription();

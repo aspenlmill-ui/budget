@@ -89,7 +89,7 @@ function summarize(settings: any, txns: any[], moves: any[], events: any[], toda
     const s = txns.filter((x) => x.pool === key).reduce((s2, x) => s2 + +x.amount, 0);
     return { name: e.name, left: b - s };
   });
-  return { out, names, customs, ev, hide: settings.partnerHide || [], resetTomorrow: next === t + 1, frac: Math.min(1, Math.max(0, (t - cw + 1) / Math.max(1, next - cw))) };
+  return { out, names, customs, ev, cwDate: new Date(cw * DAY).toISOString().slice(0, 10), full: !!settings.partnerFull, hide: settings.partnerHide || [], resetTomorrow: next === t + 1, frac: Math.min(1, Math.max(0, (t - cw + 1) / Math.max(1, next - cw))) };
 }
 
 // 5 PM check. Bills you pay yourself: asked on the due date, or 2 days before month end if there is no due date.
@@ -163,10 +163,77 @@ async function billCheck(subs: any[], force: boolean, only: string | null, sampl
   return { kind: "bills", sent, skipped, removed };
 }
 
+// Alerts: one push when a card first drops into Raptor alert, and one if it goes over (Extinction event).
+// Each card + level alerts once per budget period, between 8 AM and 9 PM local time.
+// deno-lint-ignore no-explicit-any
+async function alertCheck(subs: any[], force: boolean, only: string | null) {
+  let sent = 0, removed = 0;
+  // deno-lint-ignore no-explicit-any
+  const cache: Record<string, any> = {};
+  for (const sub of subs ?? []) {
+    if (only && sub.user_id !== only) continue;
+    const now = localNow(sub.tz);
+    if (!force && (now.hour < 8 || now.hour > 21)) continue;
+    const { data: member } = await supabase.from("household_members").select("household_id").eq("user_id", sub.user_id).maybeSingle();
+    if (!member?.household_id) continue;
+    const hid = member.household_id, ck = hid + "|" + now.date;
+    if (!(ck in cache)) {
+      const [{ data: hh }, { data: st }, { data: tx }, { data: mv }] = await Promise.all([
+        supabase.from("households").select("created_by").eq("id", hid).maybeSingle(),
+        supabase.from("wb_settings").select("data").eq("household_id", hid).maybeSingle(),
+        supabase.from("wb_txns").select("pool,amount,src,date").eq("household_id", hid),
+        supabase.from("wb_moves").select("from_ep,to_ep,amount,date").eq("household_id", hid),
+      ]);
+      cache[ck] = st?.data ? { owner: hh?.created_by, s: summarize(st.data, tx ?? [], mv ?? [], [], now.date) } : null;
+    }
+    const c = cache[ck];
+    if (!c) continue;
+    const isOwner = c.owner === sub.user_id, s = c.s;
+    const pools: string[] = isOwner || s.full ? [...BASE, ...s.customs.map((x: any) => x.id)] : ["grace", ...(s.hide.includes("household") ? [] : ["household"])];
+    const mine = isOwner ? "aspen" : "grace";
+    for (const p of pools) {
+      const x = s.out[p]; if (!x) continue;
+      const stt = poolStatus(x, s.frac);
+      if (stt !== "warn" && stt !== "bad") continue;
+      const type = `alert:${p}:${stt}`;
+      if (!force) {
+        const { data: already } = await supabase.from("notification_send_log").select("id").eq("user_id", sub.user_id).eq("local_date", s.cwDate).eq("notification_type", type).maybeSingle();
+        if (already) continue;
+      }
+      const name = p === mine ? "Your money" : s.names[p];
+      const title = stt === "bad" ? `\u2604\ufe0f Extinction event: ${name}` : `\ud83e\uddb4 Raptor alert: ${name}`;
+      const body = x.left < 0 ? `${name} is ${money(-x.left)} over this week.${x.cushion + x.left >= 0 ? " Splurge money can cover it." : " Move money or pause spending."}`
+        : `${name} has ${money(x.left)} left of ${money(x.alloc)}. Tread carefully.`;
+      try {
+        await webpush.sendNotification({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth_key } }, JSON.stringify({ notification: { title, body, tag: `alert-${p}-${s.cwDate}`, navigate: APP_URL } }), { TTL: 6 * 3600 });
+        sent++;
+        if (!force) await supabase.from("notification_send_log").insert({ user_id: sub.user_id, local_date: s.cwDate, notification_type: type });
+      } catch (e: any) {
+        const status = e?.statusCode ?? e?.status;
+        if (status === 404 || status === 410 || (status === 400 && String(e?.body || "").includes("VapidPkHashMismatch"))) { await supabase.from("push_subscriptions").delete().eq("id", sub.id); removed++; break; }
+        else console.error(e);
+      }
+    }
+  }
+  return { kind: "alerts", sent, removed };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   const url = new URL(req.url);
   if (req.method === "GET" && url.searchParams.get("key") === "1") return Response.json({ publicKey: VAPID_PUBLIC_KEY }, { headers: cors });
+  // Instant check right after someone logs a purchase: signed-in user, only their own household.
+  if (url.searchParams.get("kind") === "alerts-now") {
+    const tok = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+    const { data: u } = await supabase.auth.getUser(tok);
+    if (!u?.user) return new Response("Unauthorized", { status: 401, headers: cors });
+    const { data: mem } = await supabase.from("household_members").select("household_id").eq("user_id", u.user.id).maybeSingle();
+    if (!mem?.household_id) return Response.json({ ok: true }, { headers: cors });
+    const { data: ms } = await supabase.from("household_members").select("user_id").eq("household_id", mem.household_id);
+    const ids = (ms ?? []).map((m) => m.user_id);
+    const { data: hs } = await supabase.from("push_subscriptions").select("id,user_id,endpoint,p256dh,auth_key,tz").in("user_id", ids);
+    return Response.json({ ok: true, ...(await alertCheck(hs ?? [], false, null)) }, { headers: cors });
+  }
   const secret = await cronSecret();
   if (!secret || req.headers.get("x-cron-secret") !== secret) return new Response("Unauthorized", { status: 401 });
 
@@ -179,6 +246,8 @@ Deno.serve(async (req) => {
   const at = (h: number) => (allSubs ?? []).filter((x) => localNow(x.tz).hour === h);
   const bills = force ? (kind === "bills" || kind === "sample" ? await billCheck(allSubs ?? [], true, only, kind === "sample" ? (url.searchParams.get("ask") || "paid") : "") : null) : await billCheck(at(17), false, only);
   if (force && (kind === "bills" || kind === "sample")) return Response.json({ ok: true, ...bills });
+  if (force && kind === "alerts") return Response.json({ ok: true, ...(await alertCheck(allSubs ?? [], true, only)) });
+  const alerts = force ? null : await alertCheck(allSubs ?? [], false, only);
   const subs = force ? (allSubs ?? []) : at(19);
   let sent = 0, skipped = 0, removed = 0, failed = 0;
   const cache: Record<string, unknown> = {};
@@ -216,7 +285,8 @@ Deno.serve(async (req) => {
     let title: string, body: string;
     if (resetTomorrow) {
       title = "Budgets refill tomorrow";
-      body = pools.map((p) => `${label(p)}: add ${money(out[p].nextBudget - out[p].left)} (${money(out[p].left)} left → splurge)`).join("\n");
+      const rp = isOwner ? [...pools, "grace"] : pools;
+      body = rp.map((p) => `${label(p)}: add ${money(Math.max(0, out[p].nextBudget - out[p].left))} (${money(out[p].left)} left → splurge)`).join("\n");
     } else {
       title = `${overall(out, pools, frac)} Tomorrow’s starting balance`;
       body = pools.map((p) => `${label(p)}: ${money(out[p].left)}${out[p].left < 0 ? " (over)" : ""}`).join("\n");
@@ -235,5 +305,5 @@ Deno.serve(async (req) => {
       else { console.error(e); failed++; }
     }
   }
-  return Response.json({ ok: true, bills, sent, skipped, removed, failed, force });
+  return Response.json({ ok: true, bills, alerts, sent, skipped, removed, failed, force });
 });
