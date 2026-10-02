@@ -31,7 +31,7 @@ function localNow(tz?: string) {
 
 // deno-lint-ignore no-explicit-any
 function poolStatus(x: any, frac: number) {
-  if (x.left < -0.004) return x.cushion + x.left >= 0 ? "warn" : "bad";
+  if (x.left < -0.004) return (x.short != null ? x.short <= 0.004 : x.cushion + x.left >= 0) ? "warn" : "bad";
   if (x.alloc <= 0) return "good";
   if (x.alloc > 40 && x.left <= 20) return "warn";
   const used = x.spent / x.alloc;
@@ -77,10 +77,31 @@ function summarize(settings: any, txns: any[], moves: any[], events: any[], toda
   for (const m of moves) { const k = wk(m.date); ap(m.from_ep, -m.amount, k); ap(m.to_ep, +m.amount, k); }
   // deno-lint-ignore no-explicit-any
   const out: Record<string, any> = {};
-  for (const p of pools) { const r = R[p]; let c = r.cush;
-    for (const x of L) if (x < cw) c += budgetFor(p, x) + (r.adj[x] || 0) - (r.spent[x] || 0);
-    const alloc = budgetFor(p, cw) + (r.adj[cw] || 0), spent = r.spent[cw] || 0;
-    out[p] = { left: alloc - spent, cushion: c, nextBudget: budgetFor(p, next) + (r.adj[next] || 0), alloc, spent }; }
+  // Period end: leftovers go to splurge; overspending is covered by splurge (the card's own first, then the others'),
+  // and only what all splurge can't cover comes off the next period. Mirrors settle() in the app.
+  const r2 = (x: number) => Math.round(x * 100) / 100;
+  const settle = (lefts: Record<string, number>, cush: Record<string, number>) => {
+    const carry: Record<string, number> = {};
+    for (const p of pools) if (lefts[p] > 0) cush[p] += lefts[p];
+    for (const p of pools) { let d = -lefts[p]; if (!(d > 0.004)) continue;
+      const order = [p, ...pools.filter((q) => q !== p).sort((a, b) => cush[b] - cush[a])];
+      for (const q of order) { if (d <= 0.004) break; const t = Math.min(d, Math.max(0, cush[q])); if (t > 0.004) { cush[q] -= t; d -= t; } }
+      if (d > 0.004) carry[p] = r2(d); }
+    for (const p of pools) cush[p] = r2(cush[p]);
+    return carry; };
+  const cush: Record<string, number> = {}, carry: Record<string, Record<number, number>> = {};
+  for (const p of pools) { cush[p] = R[p].cush; carry[p] = {}; }
+  for (const x of L) { if (x >= cw) continue; const lefts: Record<string, number> = {};
+    for (const p of pools) lefts[p] = budgetFor(p, x) + (R[p].adj[x] || 0) - (carry[p][x] || 0) - (R[p].spent[x] || 0);
+    const cr = settle(lefts, cush), nx = step(x);
+    for (const p in cr) carry[p][nx] = (carry[p][nx] || 0) + cr[p]; }
+  const lefts: Record<string, number> = {};
+  for (const p of pools) { const r = R[p];
+    const alloc = budgetFor(p, cw) + (r.adj[cw] || 0) - (carry[p][cw] || 0), spent = r.spent[cw] || 0;
+    lefts[p] = alloc - spent;
+    out[p] = { left: alloc - spent, cushion: cush[p], alloc, spent }; }
+  const proj = settle(lefts, { ...cush }), pos = pools.reduce((s, p) => s + Math.max(0, cush[p]), 0);
+  for (const p of pools) { out[p].nextBudget = budgetFor(p, next) + (R[p].adj[next] || 0) - (proj[p] || 0); out[p].short = Math.max(0, -lefts[p] - pos); }
   const names = { household: "Household", aspen: "Me", grace: "Partner", extras: "Extras", ...(settings.names || {}) };
   for (const c of customs) names[c.id] = c.name;
   const ev = events.filter((e) => e.active).map((e) => {
@@ -202,7 +223,7 @@ async function alertCheck(subs: any[], force: boolean, only: string | null) {
       }
       const name = p === mine ? "Your money" : s.names[p];
       const title = stt === "bad" ? `\u2604\ufe0f Extinction event: ${name}` : `\ud83e\uddb4 Raptor alert: ${name}`;
-      const body = x.left < 0 ? `${name} is ${money(-x.left)} over this week.${x.cushion + x.left >= 0 ? " Splurge money can cover it." : " Move money or pause spending."}`
+      const body = x.left < 0 ? `${name} is ${money(-x.left)} over this week.${x.short <= 0.004 ? " Splurge money can cover it." : " Move money or pause spending."}`
         : `${name} has ${money(x.left)} left of ${money(x.alloc)}. Tread carefully.`;
       try {
         await webpush.sendNotification({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth_key } }, JSON.stringify({ notification: { title, body, tag: `alert-${p}-${s.cwDate}`, navigate: APP_URL } }), { TTL: 6 * 3600 });
