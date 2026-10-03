@@ -613,6 +613,11 @@ function addMoneyFixes(c){const out=[],fs=forcedStarts(),r2=x=>Math.round(x*100)
     if(ct>0.004)out.push({k:"cover-"+p,label:`Refill the splurge that covered ${NAMES[p]} (${m2(ct)})`,amt:ct,plan:cov.map(x=>({ep:`cushion:${x.q}`,amt:x.amt}))});
   }
   return out}
+function addMoneyPlan(amt,to){let plan=[{ep:to,amt}],left=0;
+  if(to.startsWith("fix:")){const f=addMoneyFixes(compute()).find(x=>"fix:"+x.k===to);if(!f)return null;
+    plan=[];left=amt;for(const x of f.plan){if(left<=0.004)break;const t=Math.round(Math.min(left,x.amt)*100)/100;plan.push({ep:x.ep,amt:t});left=Math.round((left-t)*100)/100}}
+  return {plan,left}}
+async function addMoneyIn(plan,note){for(const x of plan){await db.collection("moves").add({from:"in",to:x.ep,amount:x.amt,reason:note||"Money added",date:todayS(),ts:Date.now()});if(goalBump(x.ep,x.amt))savePlan()}}
 function addMoneyCard(c){
   const fixes=addMoneyFixes(c),sel=S.amTo||(fixes[0]?"fix:"+fixes[0].k:"week:household");
   return `<form class="card" id="amf"><h2>Add money in</h2>
@@ -628,12 +633,9 @@ let amBusy=false;
 document.addEventListener("submit",async e=>{if(e.target.id!=="amf")return;e.preventDefault();if(amBusy)return;
   const amt=num(val("am-amt")),to=val("am-to"),note=val("am-note").trim().slice(0,80);
   if(!(amt>0)){toast("Enter the amount");return}
-  let plan=[{ep:to,amt}],left=amt;
-  if(to.startsWith("fix:")){const f=addMoneyFixes(compute()).find(x=>"fix:"+x.k===to);if(!f){toast("Pick where it goes");return}
-    plan=[];for(const x of f.plan){if(left<=0.004)break;const t=Math.round(Math.min(left,x.amt)*100)/100;plan.push({ep:x.ep,amt:t});left=Math.round((left-t)*100)/100}}
-  else left=0;
+  const pl=addMoneyPlan(amt,to);if(!pl){toast("Pick where it goes");return}const left=pl.left;
   amBusy=true;const btn=e.target.querySelector('button[type="submit"]');if(btn){btn.disabled=true;btn.textContent="Saving…"}
-  try{for(const x of plan){await db.collection("moves").add({from:"in",to:x.ep,amount:x.amt,reason:note||"Money added",date:todayS(),ts:Date.now()});if(goalBump(x.ep,x.amt))savePlan()}
+  try{await addMoneyIn(pl.plan,note);
     S.amTo=null;render();
     if(left>0.004){const el=document.getElementById("am-amt");if(el)el.value=left.toFixed(2);toast(`Added ${m2(amt-left)}. ${m2(left)} left over, pick where it goes.`)}
     else toast(`Added ${m2(amt)}`)}
@@ -784,7 +786,12 @@ function incomeSplit(amt,src,dateS){
 function incomePreviewHtml(){
   const amt=num(val("if-amt")),src=val("if-src")||"mine";
   if(!(amt>0))return `<div class="small muted">Type the amount to see how much has to go to bills.</div>`;
-  const goal=val("if-to")!=="",s=depositPlan(amt,src,val("if-date"),goal),lb=L();
+  const toV=val("if-to");
+  if(/^(fix|week|cushion):/.test(toV)){const pl=addMoneyPlan(amt,toV);if(!pl)return "";
+    return `<div class="ledger">${pl.plan.map(x=>`<div class="strong"><span>${esc(epLabel(x.ep))}</span><b style="color:var(--good)">+${m2(x.amt)}</b></div>`).join("")}
+      ${pl.left>0.004?`<div><span class="muted">Left over (pick where it goes next)</span><b class="muted">${m2(pl.left)}</b></div>`:""}</div>
+      <div class="small muted">Goes straight onto ${pl.plan.length>1?"those":"that"}, and into the linked bank account's balance. Skips the normal split.</div>`}
+  const goal=toV!=="",s=depositPlan(amt,src,val("if-date"),goal),lb=L();
   return `<div class="ledger">
     <div><span>${esc(lb.bills)} bills due by ${short(s.end)}</span><b>${m2(s.due.sum)}</b></div>
     <div><span class="muted">${esc(lb.bills)} has now</span><b class="muted">${m2(s.chase)}</b></div>
@@ -817,7 +824,11 @@ function incomeCard(){
       <div class="row"><label class="f">What came in<select id="if-src">${incomeSources().map(([k,l])=>`<option value="${k}">${esc(l)}</option>`).join("")}</select></label>
         <label class="f">Amount<input id="if-amt" inputmode="decimal" placeholder="0.00"></label></div>
       <div class="row"><label class="f">Date<input type="date" id="if-date" value="${todayS()}"></label>
-        <label class="f">Put it toward<select id="if-to"><option value="">Normal split</option>${goals.map((g,i)=>g.done?"":`<option value="${i}">${esc(g.name)}</option>`).join("")}</select></label></div>
+        <label class="f">Put it toward<select id="if-to"><option value="">Normal split</option>
+          ${(()=>{const fx=addMoneyFixes(compute());return fx.length?`<optgroup label="Make up for overspending">${fx.map(f=>`<option value="fix:${esc(f.k)}">${esc(f.label)}</option>`).join("")}</optgroup>`:""})()}
+          <optgroup label="Spending cards">${POOLS.map(p=>`<option value="week:${p}">${esc(NAMES[p])} ${esc(PER().this)}</option>`).join("")}</optgroup>
+          <optgroup label="Splurge money">${POOLS.map(p=>`<option value="cushion:${p}">${esc(NAMES[p])} splurge</option>`).join("")}</optgroup>
+          <optgroup label="Savings buckets">${goals.map((g,i)=>g.done?"":`<option value="${i}">${esc(g.name)}</option>`).join("")}</optgroup></select></label></div>
       <label class="f">Note<input id="if-note" placeholder="Sept 25 check, 42 OT hours"></label>
       <div id="if-preview">${incomePreviewHtml()}</div>
       <label class="check small"><input type="checkbox" id="if-bal" checked> Add it to my account balances this way</label>
@@ -826,7 +837,7 @@ function incomeCard(){
     ${split}
     <div class="kv" style="margin-top:8px"><span>${esc(t.toLocaleDateString("en-US",{month:"long"}))} so far</span><b>${m2(mtot)}</b></div>
     ${list.length?`<details><summary class="small"><b>Income history (${list.length})</b></summary><div class="list">${list.slice(0,30).map(x=>`<div class="item"><div class="grow"><div>${esc(src[x.src]||"Income")}</div>
-      <div class="muted small">${short(dn(x.date))}${x.note?" · "+esc(x.note):""}${x.to!==""&&x.to!=null&&goals[x.to]?` · to ${esc(goals[x.to].name)}`:""}</div></div>
+      <div class="muted small">${short(dn(x.date))}${x.note?" · "+esc(x.note):""}${x.card?` · to ${esc(x.card)}`:x.to!==""&&x.to!=null&&goals[x.to]?` · to ${esc(goals[x.to].name)}`:""}</div></div>
       <b class="num">${m2(x.amt)}</b><button class="x" data-act="delinc" data-id="${esc(x.id)}">Delete</button></div>`).join("")}</div></details>`:""}
   </div>`;
 }
@@ -1531,7 +1542,17 @@ document.addEventListener("submit",async e=>{
     const cutoff=ds(dn(todayS())-100).slice(0,7);S.plan.paid=S.plan.paid.filter(x=>(x.split("|")[1]||"")>=cutoff);S.plan.paidLog=S.plan.paidLog.filter(x=>(x.key.split("|")[1]||"")>=cutoff);
     S.payOpen=null;render();savePlan();toast(prev?"Paid in full":"Marked paid")}
   if(f.id==="incf"){const amt=num(val("if-amt"));if(!(amt>0)){toast("Enter the amount");return}
-    const to=val("if-to");const inc={id:Date.now(),src:val("if-src"),amt,date:val("if-date")||todayS(),note:val("if-note").trim().slice(0,80),to:to===""?"":+to};
+    const to=val("if-to");
+    if(/^(fix|week|cushion):/.test(to)){const pl=addMoneyPlan(amt,to);if(!pl){toast("Pick where it goes");return}
+      const used=Math.round((amt-pl.left)*100)/100,note=val("if-note").trim().slice(0,80);
+      const btn=f.querySelector('button[type="submit"]');if(btn){if(btn.disabled)return;btn.disabled=true;btn.textContent="Saving…"}
+      try{await addMoneyIn(pl.plan,note||(incomeSources().find(x=>x[0]===val("if-src"))||[,""])[1]);
+        (S.plan.income||(S.plan.income=[])).push({id:Date.now(),src:val("if-src"),amt:used,date:val("if-date")||todayS(),note,to:"",card:pl.plan.map(x=>epLabel(x.ep)).join(", ")});
+        S.plan.income=S.plan.income.slice(-200);render();savePlan();
+        if(pl.left>0.004){const el=document.getElementById("if-amt");if(el)el.value=pl.left.toFixed(2);toast(`Added ${m2(used)}. ${m2(pl.left)} left over, pick where it goes.`)}else toast(`Added ${m2(amt)} to ${pl.plan.map(x=>epLabel(x.ep)).join(", ")}`)}
+      catch(err){fail(err);if(btn){btn.disabled=false;btn.textContent="Add income"}}
+      return}
+    const inc={id:Date.now(),src:val("if-src"),amt,date:val("if-date")||todayS(),note:val("if-note").trim().slice(0,80),to:to===""?"":+to};
     if(document.getElementById("if-bal")?.checked){const d=depositPlan(amt,inc.src,inc.date,inc.to!=="");
       for(const [k,v] of Object.entries(d.out))acctAdjust(k,v);inc.applied=d.out}
     (S.plan.income||(S.plan.income=[])).push(inc);S.plan.income=S.plan.income.slice(-200);
@@ -1795,7 +1816,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202610022013";
+const BUILD="202610022021";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
