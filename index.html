@@ -788,19 +788,20 @@ function incomePreviewHtml(){
   if(!(amt>0))return `<div class="small muted">Type the amount to see how much has to go to bills.</div>`;
   const toV=val("if-to");
   if(/^(fix|week|cushion):/.test(toV)){const pl=addMoneyPlan(amt,toV);if(!pl)return "";
-    return `<div class="ledger">${pl.plan.map(x=>`<div class="strong"><span>${esc(epLabel(x.ep))}</span><b style="color:var(--good)">+${m2(x.amt)}</b></div>`).join("")}
+    return `<div class="ledger">${pl.plan.map(x=>`<div class="strong"><span>${esc(epLabel(x.ep))}${epAcct(x.ep)?` <span class="small muted">· into ${esc(acctName(epAcct(x.ep)))}</span>`:""}</span><b style="color:var(--good)">+${m2(x.amt)}</b></div>`).join("")}
       ${pl.left>0.004?`<div><span class="muted">Left over (pick where it goes next)</span><b class="muted">${m2(pl.left)}</b></div>`:""}</div>
-      <div class="small muted">Goes straight onto ${pl.plan.length>1?"those":"that"}, and into the linked bank account's balance. Skips the normal split.</div>`}
+      <div class="small muted">No split. It goes straight onto ${pl.plan.length>1?"those":"that"} and into ${pl.plan.length>1?"their":"its"} bank account.</div>`}
   const goal=toV!=="",s=depositPlan(amt,src,val("if-date"),goal),lb=L();
   return `<div class="ledger">
-    <div><span>${esc(lb.bills)} bills due by ${short(s.end)}</span><b>${m2(s.due.sum)}</b></div>
-    <div><span class="muted">${esc(lb.bills)} has now</span><b class="muted">${m2(s.chase)}</b></div>
+    ${s.rule.cover?`<div><span>${esc(lb.bills)} bills due by ${short(s.end)}</span><b>${m2(s.due.sum)}</b></div>
+    <div><span class="muted">${esc(lb.bills)} has now</span><b class="muted">${m2(s.chase)}</b></div>`:""}
     ${s.auto.map(x=>`<div><span>Automatic: ${esc(acctName(x.to))}</span><b>${m2(x.amt)}</b></div>`).join("")}
     ${s.spend?`<div><span>Spending refill</span><b>${m2(s.spend)}</b></div>`:""}
     ${Object.entries(s.out).filter(([,v])=>v>0).map(([k,v])=>`<div class="strong"><span>Ends up in ${esc(acctName(k))}</span><b style="color:var(--good)">${m2(v)}</b></div>`).join("")}
   </div>
   ${s.move>0?`<div class="small muted">Includes ${m2(s.move)} moved to ${esc(lb.bills)} so it covers bills due by ${short(s.end)}.</div>`:""}
-  ${s.due.items.length?`<div class="small muted">${s.due.items.map(x=>`${esc(x.name)} ${short(x.due)} ${m0(x.amt)}`).join(" · ")}</div>`:""}
+  ${!s.rule.cover&&!s.spend?`<div class="small muted">Only ${esc(NAMES.aspen)}'s paycheck gets split. This goes straight into one account.</div>`:""}
+  ${s.rule.cover&&s.due.items.length?`<div class="small muted">${s.due.items.map(x=>`${esc(x.name)} ${short(x.due)} ${m0(x.amt)}`).join(" · ")}</div>`:""}
   <div class="small muted">Change where this goes in <b>Where paychecks go</b> below.</div>`;
 }
 document.addEventListener("input",e=>{if(["if-amt","if-src","if-date"].includes(e.target.id)){const el=document.getElementById("if-preview");if(el)el.innerHTML=incomePreviewHtml()}});
@@ -812,7 +813,7 @@ function incomeCard(){
   const month=list.filter(x=>String(x.date).startsWith(mk)),mtot=month.reduce((s,x)=>s+(+x.amt||0),0);
   const src=Object.fromEntries(incomeSources());
   const goals=P.goals||[];
-  const lastCheck=list.find(x=>x.src==="mine");
+  const lastCheck=list.find(x=>x.src==="mine"&&!x.card&&(+x.amt||0)>=200);
   let split="";
   if(lastCheck&&!lastCheck.applied){const c=compute(),phase=P.postClosing?"post":"pre",perCheck=billTotal(phase)*12/26,spend=POOLS.reduce((s,p)=>s+c[p].budget,0)*perCheckFactor(),rest=lastCheck.amt-perCheck-spend;
     split=`<div class="split" style="margin-top:10px"><span class="label" style="grid-column:1/-1">Split for your ${short(dn(lastCheck.date))} check (${m2(lastCheck.amt)})</span>
@@ -824,7 +825,7 @@ function incomeCard(){
       <div class="row"><label class="f">What came in<select id="if-src">${incomeSources().map(([k,l])=>`<option value="${k}">${esc(l)}</option>`).join("")}</select></label>
         <label class="f">Amount<input id="if-amt" inputmode="decimal" placeholder="0.00"></label></div>
       <div class="row"><label class="f">Date<input type="date" id="if-date" value="${todayS()}"></label>
-        <label class="f">Put it toward<select id="if-to"><option value="">Normal split</option>
+        <label class="f">Put it toward<select id="if-to"><option value="">Usual way</option>
           ${(()=>{const fx=addMoneyFixes(compute());return fx.length?`<optgroup label="Make up for overspending">${fx.map(f=>`<option value="fix:${esc(f.k)}">${esc(f.label)}</option>`).join("")}</optgroup>`:""})()}
           <optgroup label="Spending cards">${POOLS.map(p=>`<option value="week:${p}">${esc(NAMES[p])} ${esc(PER().this)}</option>`).join("")}</optgroup>
           <optgroup label="Splurge money">${POOLS.map(p=>`<option value="cushion:${p}">${esc(NAMES[p])} splurge</option>`).join("")}</optgroup>
@@ -888,7 +889,8 @@ function acctName(k){return acctList().find(a=>a.k===k)?.name||"Account"}
 function acctOpts(sel){return acctList().map(a=>`<option value="${esc(a.k)}" ${a.k===sel?"selected":""}>${esc(a.name)}</option>`).join("")}
 
 /* ---------- where each kind of paycheck lands, and automatic amounts to other accounts ---------- */
-function depRule(src){const d={home:"usaa",cover:src!=="partner",spend:src==="mine",splits:[]};return {...d,...(S.plan?.deposit?.[src]||{})}}
+/* Only Aspen's paycheck splits (bills, spending refill, savings). Everything else lands in one account: Grace's pay in Grace's card account, the rest in USAA. */
+function depRule(src){const d={home:src==="partner"?(linkOf("grace")||"usaa"):"usaa",cover:src==="mine",spend:src==="mine",splits:[]};return {...d,...(S.plan?.deposit?.[src]||{})}}
 function depRuleSet(src){const P=S.plan;P.deposit=P.deposit||{};return P.deposit[src]=P.deposit[src]||depRule(src)}
 function depositPlan(amt,src,dateS,goal){
   const P=S.plan,r=depRule(src),c=compute(),out={},add=(k,v)=>{if(v)out[k]=Math.round(((out[k]||0)+v)*100)/100};
@@ -1816,7 +1818,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202610022021";
+const BUILD="202610022026";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
