@@ -165,6 +165,7 @@ html,body{margin:0}
 .rl .label{font-size:10px;letter-spacing:.05em}
 .rl-name{font-weight:600;align-self:center;overflow-wrap:anywhere}
 @media (max-width:380px){.rl{grid-template-columns:1fr 1fr}.rl-name{grid-column:1/-1}}
+.sttable{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:8px 10px;align-items:center;margin:10px 0}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 </head>
@@ -458,24 +459,25 @@ function rescueBanner(c){
 
 /* ---------- budget health: fire / green / yellow / red ---------- */
 function weekFrac(c){const len=Math.max(1,nextReset()-c.cw),day=dn(todayS())-c.cw+1;return Math.min(1,Math.max(0,day/len))}
-function poolStatus(x,frac){
+/* Status by how much is left, as a % of the card. Lower cutoffs in the last days before refill. */
+const STATUS_TH={fire:60,good:25,fireEnd:30,goodEnd:10,days:2};
+function statusTh(){return {...STATUS_TH,...(S.settings?.statusTh||{})}}
+function statusEnd(){return nextReset()-dn(todayS())<=statusTh().days}
+function pctStatus(left,alloc){const t=statusTh(),e=statusEnd(),pl=left/alloc*100;
+  return pl>=(e?t.fireEnd:t.fire)?"fire":pl>=(e?t.goodEnd:t.good)?"good":"warn"}
+function poolStatus(x){
   if(x.left<-0.004)return (x.short!=null?x.short<=0.004:x.cushion+x.left>=0)?"warn":"bad";
   if(x.alloc<=0)return "good";
   if(x.alloc>40&&x.left<=20)return "warn"; // $20 or less left on a spending card
-  const used=x.spent/x.alloc;
-  if(used>=0.9&&frac<0.85)return "warn";
-  if(used>frac+0.15)return "warn";
-  if(frac>=0.3&&used<=frac*0.7)return "fire";
-  return "good";
+  return pctStatus(x.left,x.alloc);
 }
 function overallStatus(c,pools){
-  const f=weekFrac(c),st=pools.map(p=>poolStatus(c[p],f));
+  const st=pools.map(p=>poolStatus(c[p]));
   if(st.includes("bad"))return "bad";if(st.includes("warn"))return "warn";
-  const spent=pools.reduce((s,p)=>s+c[p].spent,0),alloc=pools.reduce((s,p)=>s+c[p].alloc,0);
-  if(f>=0.3&&alloc>0&&spent/alloc<=f*0.7)return "fire";
-  return "good";
+  const left=pools.reduce((s,p)=>s+c[p].left,0),alloc=pools.reduce((s,p)=>s+c[p].alloc,0);
+  return alloc>0?pctStatus(left,alloc):"good";
 }
-const STATUS={fire:["🌋","Volcano hot","Way under pace. The herd is thriving."],good:["🦖","On track","Right where you should be. All quiet in the jungle."],warn:["🦴","Raptor alert","Something is getting close to its limit. Tread carefully."],bad:["☄️","Extinction event","A card is over and all your splurge together can't cover it. Move money or pause spending."]};
+const STATUS={fire:["🌋","Volcano hot","Plenty left. The herd is thriving."],good:["🦖","On track","Right where you should be. All quiet in the jungle."],warn:["🦴","Raptor alert","Something is running low. Tread carefully."],bad:["☄️","Extinction event","A card is over and all your splurge together can't cover it. Move money or pause spending."]};
 function statusBanner(c,pools){const s=overallStatus(c,pools),[em,t,d]=STATUS[s];
   return `<div class="status ${s}"><span class="em" aria-hidden="true">${em}</span><div><b>${t}</b><div class="small muted">${d}</div></div></div>`}
 
@@ -579,6 +581,7 @@ function weekTab(){
       <span class="chip ${x.cushion<0?"bad":""}">Splurge ${m2(x.cushion)}</span></div>`}).join("")}</div>
     <div class="muted small">Splurge is what was left over before. Unspent money rolls in when the ${PER().noun} resets; overspending comes out of it.</div>`}
     ${hideSec("log")?"":logForm(pool,false)}
+    ${S.full||S.owner?(hideSec("addmoney")?"":addMoneyCard(c)):""}
     ${hideSec("purchases")?"":`<div class="card"><h2>${cap(PER().this)}: purchases</h2>${txList(list,false)}</div>`}
     ${hideSec("reload")?"":reloadCard(c)}
     ${hideSec("newperiod")?"":`<div class="card"><h2>Start a new ${PER().noun}</h2>
@@ -591,7 +594,7 @@ function weekTab(){
   </section>`;
 }
 
-function epLabel(ep){if(ep.startsWith("next:"))return `${NAMES[ep.slice(5)]} next ${PER().noun}`;if(ep==="usaa")return (S.plan?L().save:"Savings")+" (not in a bucket)";if(ep.startsWith("goal:"))return ep.slice(5);if(ep.startsWith("event:"))return poolName(ep);const [k,p]=ep.split(":");return `${NAMES[p]} ${k==="week"?PER().this:"splurge"}`}
+function epLabel(ep){if(ep==="in")return "Money added";if(ep.startsWith("next:"))return `${NAMES[ep.slice(5)]} next ${PER().noun}`;if(ep==="usaa")return (S.plan?L().save:"Savings")+" (not in a bucket)";if(ep.startsWith("goal:"))return ep.slice(5);if(ep.startsWith("event:"))return poolName(ep);const [k,p]=ep.split(":");return `${NAMES[p]} ${k==="week"?PER().this:"splurge"}`}
 function goalByEp(ep){return String(ep).startsWith("goal:")?(S.plan?.goals||[]).find(g=>g.name===ep.slice(5)):null}
 function goalBump(ep,delta){const g=goalByEp(ep);if(g){g.saved=Math.round(((+g.saved||0)+delta)*100)/100;return true}return false}
 function epAvail(ep,c){if(ep==="usaa")return null;if(ep.startsWith("goal:"))return +(goalByEp(ep)?.saved||0);if(ep.startsWith("event:")){const e=S.events.find(x=>"event:"+x.id===ep);return e?evStats(e).left:0}const [k,p]=ep.split(":");return k==="week"?c[p].left:c[p].cushion}
@@ -599,12 +602,49 @@ function epGroups(){const g=[["Spending cards",POOLS.map(p=>`week:${p}`)],["Splu
   if(S.plan)g.push(["Savings buckets",(S.plan.goals||[]).filter(x=>!x.done&&x.name).map(x=>"goal:"+x.name)],["Savings account",["usaa"]]);else g.push(["Savings",["usaa"]]);return g.filter(x=>x[1].length)}
 function eps(){return epGroups().flatMap(x=>x[1])}
 
+/* ---------- add money in: cash, a refund, money from a friend, put straight onto a card, splurge or bucket ---------- */
+function addMoneyFixes(c){const out=[],fs=forcedStarts(),r2=x=>Math.round(x*100)/100;
+  const prev=c.L.length>1?c.L[c.L.length-2]:null;
+  for(const p of POOLS){
+    if(c[p].left<-0.004)out.push({k:"over-"+p,label:`${NAMES[p]} is over ${PER().this}`,amt:r2(-c[p].left),plan:[{ep:`week:${p}`,amt:r2(-c[p].left)}]});
+    const borrowed=r2(S.moves.filter(m=>m.from===`next:${p}`&&stepFrom(wk(m.date),fs)===c.cw).reduce((s,m)=>s+m.amount,0)+(c[p].carryIn||0));
+    if(borrowed>0.004)out.push({k:"borrow-"+p,label:`${NAMES[p]} ${PER().this} (down ${m2(borrowed)} from last ${PER().noun})`,amt:borrowed,plan:[{ep:`week:${p}`,amt:borrowed}]});
+    const cov=prev!=null?(c.R[p].cover[prev]||[]):[];const ct=r2(cov.reduce((s,x)=>s+x.amt,0));
+    if(ct>0.004)out.push({k:"cover-"+p,label:`Refill the splurge that covered ${NAMES[p]} (${m2(ct)})`,amt:ct,plan:cov.map(x=>({ep:`cushion:${x.q}`,amt:x.amt}))});
+  }
+  return out}
+function addMoneyCard(c){
+  const fixes=addMoneyFixes(c),sel=S.amTo||(fixes[0]?"fix:"+fixes[0].k:"week:household");
+  return `<form class="card" id="amf"><h2>Add money in</h2>
+    <div class="small muted">Cash, a refund, money from a friend. It goes straight onto a card, splurge or a savings bucket, and into that card's bank account balance.</div>
+    <div class="row"><label class="f">Amount<input id="am-amt" inputmode="decimal" placeholder="0.00"></label>
+      <label class="f">From<input id="am-note" placeholder="Sold the old dresser"></label></div>
+    <label class="f">Put it toward<select id="am-to">
+      ${fixes.length?`<optgroup label="Make up for overspending">${fixes.map(f=>`<option value="fix:${esc(f.k)}" ${sel==="fix:"+f.k?"selected":""}>${esc(f.label)}</option>`).join("")}</optgroup>`:""}
+      ${epGroups().map(([gl,list])=>`<optgroup label="${esc(gl)}">${list.map(e=>`<option value="${esc(e)}" ${e===sel?"selected":""}>${esc(epLabel(e))}</option>`).join("")}</optgroup>`).join("")}</select></label>
+    <button class="btn" type="submit">Add money</button></form>`}
+document.addEventListener("change",e=>{if(e.target.id==="am-to")S.amTo=e.target.value});
+let amBusy=false;
+document.addEventListener("submit",async e=>{if(e.target.id!=="amf")return;e.preventDefault();if(amBusy)return;
+  const amt=num(val("am-amt")),to=val("am-to"),note=val("am-note").trim().slice(0,80);
+  if(!(amt>0)){toast("Enter the amount");return}
+  let plan=[{ep:to,amt}],left=amt;
+  if(to.startsWith("fix:")){const f=addMoneyFixes(compute()).find(x=>"fix:"+x.k===to);if(!f){toast("Pick where it goes");return}
+    plan=[];for(const x of f.plan){if(left<=0.004)break;const t=Math.round(Math.min(left,x.amt)*100)/100;plan.push({ep:x.ep,amt:t});left=Math.round((left-t)*100)/100}}
+  else left=0;
+  amBusy=true;const btn=e.target.querySelector('button[type="submit"]');if(btn){btn.disabled=true;btn.textContent="Saving…"}
+  try{for(const x of plan){await db.collection("moves").add({from:"in",to:x.ep,amount:x.amt,reason:note||"Money added",date:todayS(),ts:Date.now()});if(goalBump(x.ep,x.amt))savePlan()}
+    S.amTo=null;render();
+    if(left>0.004){const el=document.getElementById("am-amt");if(el)el.value=left.toFixed(2);toast(`Added ${m2(amt-left)}. ${m2(left)} left over, pick where it goes.`)}
+    else toast(`Added ${m2(amt)}`)}
+  catch(err){fail(err)}finally{amBusy=false;if(btn&&btn.isConnected){btn.disabled=false;btn.textContent="Add money"}}});
 function moveTab(){
   const c=compute();
   const hist=[...S.moves].sort((a,b)=>b.ts-a.ts).slice(0,40);
   const opt=(sel)=>epGroups().map(([gl,list])=>`<optgroup label="${esc(gl)}">${list.map(e=>`<option value="${esc(e)}" ${e===sel?"selected":""}>${esc(epLabel(e))}${epAvail(e,c)!==null?` (${m2(epAvail(e,c))})`:""}</option>`).join("")}</optgroup>`).join("");
   return `<section>
     ${rescueBanner(c)}
+    ${addMoneyCard(c)}
     ${scenarioCard()}
     <form class="card" id="movef">
       <h2>Reallocate funds</h2>
@@ -801,14 +841,14 @@ function acctAdjust(which,delta){const P=S.plan;const r=v=>Math.round(v*100)/100
    logged on a partner's phone. Only counts what happened after a balance was last typed in. */
 function linkOf(pool){const m=S.plan?.cardAcct||{};return String(pool).startsWith("event:")?(m.events||""):(m[pool]||"")}
 function splurgeAcct(){const P=S.plan||{};return P.splurgeAcct||P.refillFrom||""}
-function epAcct(ep){ep=String(ep);const [k,p]=ep.split(":");
+function epAcct(ep){ep=String(ep);if(ep==="in")return "";const [k,p]=ep.split(":");
   if(k==="week"||k==="next")return linkOf(p);if(k==="cushion")return splurgeAcct();if(k==="event")return linkOf(ep);
   if(k==="goal"||ep==="usaa")return (S.plan?.cardAcct&&Object.keys(S.plan.cardAcct).length)||S.plan?.refillFrom?"usaa":"";return ""}
 function dayMs(w){return new Date(ds(w)+"T00:00:00").getTime()}
 function acctDelta(k){
   const P=S.plan;if(!P?.cardAcct)return 0;const since=(P.acctAsOf||{})[k];if(!since)return 0;let d=0;
   for(const t of S.txns)if((t.ts||0)>since&&(t.from==="cushion"&&!String(t.pool).startsWith("event:")?splurgeAcct():linkOf(t.pool))===k)d-=t.amount;
-  for(const m of S.moves){if((m.ts||0)<=since)continue;const a=epAcct(m.from),b=epAcct(m.to);if(!a||!b||a===b)continue;if(a===k)d-=m.amount;if(b===k)d+=m.amount}
+  for(const m of S.moves){if((m.ts||0)<=since)continue;if(m.from==="in"){if(epAcct(m.to)===k)d+=m.amount;continue}const a=epAcct(m.from),b=epAcct(m.to);if(!a||!b||a===b)continue;if(a===k)d-=m.amount;if(b===k)d+=m.amount}
   const src=P.refillFrom||"";
   if(src){const c=compute(),L=c.L;
     for(let i=1;i<L.length;i++){const w=L[i],prev=L[i-1],ms=dayMs(w);if(ms<=since)continue;
@@ -1197,6 +1237,7 @@ function closingCard(){
 function setupTab(){
   return `<section>
     ${periodCard()}
+    ${S.full||S.owner?statusCard():""}
     ${namesForm(false)}
     <div class="card"><h2>Extra categories</h2>
       <div class="small muted">Add categories like Pets, Gas or Eating out. Each gets its own limit and cushion, and resets with the ${PER().noun}.</div>
@@ -1243,7 +1284,26 @@ function firstRun(){
 function setPath(obj,path,val){const k=path.split(".");let o=obj;for(let i=0;i<k.length-1;i++){o=o[k[i]]??(o[k[i]]={})}o[k[k.length-1]]=val}
 let planQ=Promise.resolve();
 function savePlan(){const body=JSON.parse(JSON.stringify(S.plan));planQ=planQ.then(()=>db.doc("private/plan").set(body)).catch(fail);return planQ}
-async function saveSettings(patch){const cur=S.settings||{};const body={anchor:cur.anchor||anchor(),history:cur.history||[],starts:cur.starts||[],names:cur.names||{},title:cur.title||"",custom:cur.custom||[],periods:cur.periods||[{from:cur.anchor||anchor(),kind:"week"}],onboardDone:!!cur.onboardDone,partnerFull:!!cur.partnerFull,partnerHide:cur.partnerHide||[],seeSpending:!!cur.seeSpending,...patch};
+function statusCard(){const t=statusTh(),n=(id,v)=>`<input id="${id}" inputmode="numeric" value="${esc(v)}" style="width:100%">`;
+  return `<form class="card" id="stf"><h2>Statuses</h2>
+    <div class="small muted">Based on how much of each card is left. The last days before refill use lower numbers, since less should be left by then.</div>
+    <div class="sttable">
+      <span></span><b class="small">Most of the ${esc(PER().noun)}</b><b class="small">Last ${esc(t.days)} days</b>
+      <span>🌋 Volcano hot<div class="small muted">% left at least</div></span>${n("st-f",t.fire)}${n("st-fe",t.fireEnd)}
+      <span>🦖 On track<div class="small muted">% left at least</div></span>${n("st-g",t.good)}${n("st-ge",t.goodEnd)}
+      <span>🦴 Raptor alert</span><span class="small muted" style="grid-column:span 2">Less than that, or $20 or less on a card over $40</span>
+      <span>☄️ Extinction</span><span class="small muted" style="grid-column:span 2">A card is over and all splurge together can't cover it</span>
+    </div>
+    <div class="row"><label class="f">"Last days" means the last<select id="st-d">${[1,2,3,4].map(d=>`<option value="${d}" ${+t.days===d?"selected":""}>${d} day${d>1?"s":""}</option>`).join("")}</select></label></div>
+    <button class="btn ghost" type="submit">Save statuses</button>
+    <div class="small muted">Right now: ${statusEnd()?`last ${esc(t.days)} days before refill`:`most of the ${esc(PER().noun)}`}.</div></form>`}
+document.addEventListener("submit",async e=>{if(e.target.id!=="stf")return;e.preventDefault();
+  const g=id=>{const v=parseFloat(val(id));return isFinite(v)?Math.max(0,Math.min(100,v)):null};
+  const th={fire:g("st-f"),good:g("st-g"),fireEnd:g("st-fe"),goodEnd:g("st-ge"),days:+val("st-d")||2};
+  if(Object.values(th).some(v=>v==null)){toast("Fill in every box");return}
+  if(th.good>th.fire||th.goodEnd>th.fireEnd){toast("On track has to be lower than Volcano hot");return}
+  try{await saveSettings({statusTh:th});S.settings={...S.settings,statusTh:th};render();toast("Statuses saved")}catch(err){fail(err)}});
+async function saveSettings(patch){const cur=S.settings||{};const body={anchor:cur.anchor||anchor(),history:cur.history||[],starts:cur.starts||[],names:cur.names||{},title:cur.title||"",custom:cur.custom||[],periods:cur.periods||[{from:cur.anchor||anchor(),kind:"week"}],onboardDone:!!cur.onboardDone,partnerFull:!!cur.partnerFull,partnerHide:cur.partnerHide||[],seeSpending:!!cur.seeSpending,...(cur.statusTh?{statusTh:cur.statusTh}:{}),...patch};
   await db.doc("settings/budget").set(JSON.parse(JSON.stringify(body)))}
 function arm(b,label){if(b.classList.contains("armed"))return true;b.classList.add("armed");b.dataset.t0=b.textContent;b.textContent=label||"Tap again";setTimeout(()=>{b.classList.remove("armed");b.textContent=b.dataset.t0},3500);return false}
 
@@ -1526,7 +1586,7 @@ function partnerShowCard(){
       <div class="seg" role="group" aria-label="${esc(r.name)}" style="min-width:128px"><button type="button" data-act="pshow" data-k="${esc(r.k)}" data-v="1" aria-pressed="${r.on}">Show</button><button type="button" data-act="pshow" data-k="${esc(r.k)}" data-v="0" aria-pressed="${!r.on}">Hide</button></div></div>`).join("")}</div></div>`;
 }
 /* ---------- per-person Home screen choices (saved to your own account) ---------- */
-const HOME_SECTIONS=[["bills","Bills due today"],["status","How it's going (status)"],["cards","Budget cards"],["log","Log a purchase"],["purchases","This period's purchases"],["reload","Refill amounts"],["newperiod","Start a new period"],["spend","Pay for something from a budget"]];
+const HOME_SECTIONS=[["bills","Bills due today"],["status","How it's going (status)"],["cards","Budget cards"],["log","Log a purchase"],["addmoney","Add money in"],["purchases","This period's purchases"],["reload","Refill amounts"],["newperiod","Start a new period"],["spend","Pay for something from a budget"]];
 function hp(){return S.prefs?.home||{}}
 function hideSec(k){return (hp().hide||[]).includes(k)}
 function hideCard(k){return (hp().cards||[]).includes(k)}
@@ -1735,7 +1795,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202610020752";
+const BUILD="202610022013";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);

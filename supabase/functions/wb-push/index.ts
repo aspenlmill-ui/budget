@@ -29,24 +29,26 @@ function localNow(tz?: string) {
   return { date: `${g("year")}-${g("month")}-${g("day")}`, hour: Number(g("hour")) };
 }
 
+// Status by how much of a card is left (% of what it has this period); lower cutoffs in the last days before refill. Mirrors the app.
 // deno-lint-ignore no-explicit-any
-function poolStatus(x: any, frac: number) {
+function pctStatus(left: number, alloc: number, th: any, end: boolean) {
+  const pl = left / alloc * 100;
+  return pl >= (end ? th.fireEnd : th.fire) ? "fire" : pl >= (end ? th.goodEnd : th.good) ? "good" : "warn";
+}
+// deno-lint-ignore no-explicit-any
+function poolStatus(x: any, s: any) {
   if (x.left < -0.004) return (x.short != null ? x.short <= 0.004 : x.cushion + x.left >= 0) ? "warn" : "bad";
   if (x.alloc <= 0) return "good";
   if (x.alloc > 40 && x.left <= 20) return "warn";
-  const used = x.spent / x.alloc;
-  if (used >= 0.9 && frac < 0.85) return "warn";
-  if (used > frac + 0.15) return "warn";
-  if (frac >= 0.3 && used <= frac * 0.7) return "fire";
-  return "good";
+  return pctStatus(x.left, x.alloc, s.th, s.end);
 }
 // deno-lint-ignore no-explicit-any
-function overall(out: any, pools: string[], frac: number) {
-  const st = pools.map((p) => poolStatus(out[p], frac));
-  if (st.includes("bad")) return "☄️"; if (st.includes("warn")) return "🦴";
-  const spent = pools.reduce((s, p) => s + out[p].spent, 0), alloc = pools.reduce((s, p) => s + out[p].alloc, 0);
-  if (frac >= 0.3 && alloc > 0 && spent / alloc <= frac * 0.7) return "🌋";
-  return "🦖";
+function overall(out: any, pools: string[], s: any) {
+  const st = pools.map((p) => poolStatus(out[p], s));
+  if (st.includes("bad")) return "\u2604\ufe0f"; if (st.includes("warn")) return "\ud83e\uddb4";
+  const left = pools.reduce((a, p) => a + out[p].left, 0), alloc = pools.reduce((a, p) => a + out[p].alloc, 0);
+  const r = alloc > 0 ? pctStatus(left, alloc, s.th, s.end) : "good";
+  return r === "fire" ? "\ud83c\udf0b" : r === "warn" ? "\ud83e\uddb4" : "\ud83e\udd96";
 }
 // deno-lint-ignore no-explicit-any
 function summarize(settings: any, txns: any[], moves: any[], events: any[], today: string) {
@@ -110,7 +112,8 @@ function summarize(settings: any, txns: any[], moves: any[], events: any[], toda
     const s = txns.filter((x) => x.pool === key).reduce((s2, x) => s2 + +x.amount, 0);
     return { name: e.name, left: b - s };
   });
-  return { out, names, customs, ev, cwDate: new Date(cw * DAY).toISOString().slice(0, 10), full: !!settings.partnerFull, hide: settings.partnerHide || [], resetTomorrow: next === t + 1, frac: Math.min(1, Math.max(0, (t - cw + 1) / Math.max(1, next - cw))) };
+  const th = { fire: 60, good: 25, fireEnd: 30, goodEnd: 10, days: 2, ...(settings.statusTh || {}) };
+  return { th, end: next - t <= th.days, out, names, customs, ev, cwDate: new Date(cw * DAY).toISOString().slice(0, 10), full: !!settings.partnerFull, hide: settings.partnerHide || [], resetTomorrow: next === t + 1, frac: Math.min(1, Math.max(0, (t - cw + 1) / Math.max(1, next - cw))) };
 }
 
 // 5 PM check. Bills you pay yourself: asked on the due date, or 2 days before month end if there is no due date.
@@ -214,7 +217,7 @@ async function alertCheck(subs: any[], force: boolean, only: string | null) {
     const mine = isOwner ? "aspen" : "grace";
     for (const p of pools) {
       const x = s.out[p]; if (!x) continue;
-      const stt = poolStatus(x, s.frac);
+      const stt = poolStatus(x, s);
       if (stt !== "warn" && stt !== "bad") continue;
       const type = `alert:${p}:${stt}`;
       if (!force) {
@@ -299,7 +302,7 @@ Deno.serve(async (req) => {
     const c = cache[ck] as any;
     if (!c) { failed++; continue; }
     const isOwner = c.owner === sub.user_id;
-    const { out, names, hide, resetTomorrow, frac } = c.s;
+    const { out, names, hide, resetTomorrow } = c.s;
     // Nightly: just your own money and Household.
     const pools: string[] = isOwner ? ["aspen", "household"] : ["grace", ...(hide.includes("household") ? [] : ["household"])];
     const label = (p: string) => (p === (isOwner ? "aspen" : "grace") ? "My Money" : names[p]);
@@ -309,7 +312,7 @@ Deno.serve(async (req) => {
       const rp = isOwner ? [...pools, "grace"] : pools;
       body = rp.map((p) => `${label(p)}: add ${money(Math.max(0, out[p].nextBudget - out[p].left))} (${money(out[p].left)} left → splurge)`).join("\n");
     } else {
-      title = `${overall(out, pools, frac)} Tomorrow’s starting balance`;
+      title = `${overall(out, pools, c.s)} Tomorrow’s starting balance`;
       body = pools.map((p) => `${label(p)}: ${money(out[p].left)}${out[p].left < 0 ? " (over)" : ""}`).join("\n");
     }
     const payload = JSON.stringify({ notification: { title, body, tag: `weekly-budget-${now.date}`, navigate: APP_URL } });
