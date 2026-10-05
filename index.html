@@ -51,6 +51,8 @@ section{display:flex;flex-direction:column;gap:12px}
 .pool.over .bar i{background:var(--bad)}
 .st-fire .bar i{background:var(--fire)}.st-good .bar i{background:var(--good)}.st-warn .bar i{background:var(--warn)}.st-bad .bar i{background:var(--bad)}
 .status{display:flex;align-items:center;gap:12px;border-radius:var(--r);padding:14px 16px;border:1px solid var(--line)}
+.stpair{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.stpair .status{padding:12px;gap:8px;align-items:flex-start}.stpair .status .em{font-size:26px;width:30px}.stpair .status b{font-size:16px;line-height:1.2}
 .status .em{font-size:30px;line-height:1;width:40px;flex:none;text-align:center}
 .status b{display:block;font-family:var(--display);font-size:18px}
 .status.fire{background:var(--fire-soft);border-color:var(--fire)}.status.fire b{color:var(--fire)}
@@ -296,7 +298,7 @@ function simpleView(me,self){
   const who=tab===me?NAMES[me]:tname;
   return `
   ${self?`<div style="display:flex;justify-content:flex-end;margin-bottom:6px"><button class="btn ghost sm" data-act="simpleview" data-v="0">Full app</button></div>`:S.owner?`<header><div><div class="label">Preview</div><h1 class="brand"><img src="icon.svg" alt="" class="logo">${esc(NAMES.grace)}'s screen</h1></div><button class="btn ghost sm" data-act="view" data-v="aspen">Back to my view</button></header>`:""}
-  <div style="margin-bottom:10px">${statusBanner(c,[me,...pp])}</div>
+  <div style="margin-bottom:10px">${statusPair(c,me)}</div>
   <nav class="seg gtabs" role="tablist" style="margin-top:4px">${tabs.map(([k,l])=>`<button type="button" role="tab" data-act="gtab" data-k="${esc(k)}" aria-pressed="${k===tab}">${esc(l)}</button>`).join("")}</nav>
   <div class="card hero ${left<0?"over":""}">
     <div class="label">${esc(who)} money left</div>
@@ -478,6 +480,12 @@ function overallStatus(c,pools){
   return alloc>0?pctStatus(left,alloc):"good";
 }
 const STATUS={fire:["🌋","Volcano hot","Plenty left. The herd is thriving."],good:["🦖","On track","Right where you should be. All quiet in the jungle."],warn:["🦴","Raptor alert","Something is running low. Tread carefully."],bad:["☄️","Extinction event","A card is over and all your splurge together can't cover it. Move money or pause spending."]};
+/* Status tiles: your own money and Household, side by side. */
+function statusPair(c,me){
+  const ps=[me,"household"].filter(p=>c[p]&&(p===me||S.owner||S.full||partnerPools().includes(p)));
+  return `<div class="stpair">${ps.map(p=>{const x=c[p],s=poolStatus(x),[em,t]=STATUS[s];
+    return `<div class="status ${s}"><span class="em" aria-hidden="true">${em}</span><div style="min-width:0"><div class="small muted">${p===me?"My Money":esc(NAMES[p])}</div><b>${t}</b>
+      <div class="small muted">${x.left<0?`${m2(-x.left)} over`:`${m0(x.left)} left of ${m0(x.alloc)}`}</div></div></div>`}).join("")}</div>`}
 function statusBanner(c,pools){const s=overallStatus(c,pools),[em,t,d]=STATUS[s];
   return `<div class="status ${s}"><span class="em" aria-hidden="true">${em}</span><div><b>${t}</b><div class="small muted">${d}</div></div></div>`}
 
@@ -571,7 +579,7 @@ function weekTab(){
   return `<section>
     ${hideSec("bills")?"":dueTodayCard()}
     ${gettingStarted()}
-    ${hideSec("status")?"":statusBanner(c,POOLS)}
+    ${hideSec("status")?"":statusPair(c,S.owner?"aspen":"grace")}
     ${rescueBanner(c)}
     ${hideSec("cards")?"":`<div class="pools">${POOLS.filter(p=>!hideCard(p)).map(p=>{const x=c[p],st=poolStatus(x,f);return `<div class="card pool st-${st} ${x.left<0?"over":""}">
       <div class="label"><span class="sdot ${st}"></span>${NAMES[p]}</div>
@@ -1818,7 +1826,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202610022026";
+const BUILD="202610051133";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
