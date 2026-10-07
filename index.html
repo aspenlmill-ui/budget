@@ -810,10 +810,12 @@ function incomePreviewHtml(){
   ${s.move>0?`<div class="small muted">Includes ${m2(s.move)} moved to ${esc(lb.bills)} so it covers bills due by ${short(s.end)}.</div>`:""}
   ${!s.rule.cover&&!s.spend?`<div class="small muted">Only ${esc(NAMES.aspen)}'s paycheck gets split. This goes straight into one account.</div>`:""}
   ${s.rule.cover&&s.due.items.length?`<div class="small muted">${s.due.items.map(x=>`${esc(x.name)} ${short(x.due)} ${m0(x.amt)}`).join(" · ")}</div>`:""}
+  ${goal?"":fillPreviewHtml(s)}
   <div class="small muted">Change where this goes in <b>Where paychecks go</b> below.</div>`;
 }
 document.addEventListener("input",e=>{if(["if-amt","if-src","if-date"].includes(e.target.id)){const el=document.getElementById("if-preview");if(el)el.innerHTML=incomePreviewHtml()}});
-document.addEventListener("change",e=>{if(["if-src","if-date","if-to"].includes(e.target.id)){const el=document.getElementById("if-preview");if(el)el.innerHTML=incomePreviewHtml()}});
+document.addEventListener("change",e=>{if(e.target.id==="if-fill"&&S.plan){S.plan.autoFill=e.target.checked;savePlan()}
+  if(["if-src","if-date","if-to","if-fill"].includes(e.target.id)){const el=document.getElementById("if-preview");if(el)el.innerHTML=incomePreviewHtml()}});
 
 function incomeCard(){
   const P=S.plan,list=[...(P.income||[])].sort((a,b)=>b.date<a.date?-1:1);
@@ -841,12 +843,13 @@ function incomeCard(){
       <label class="f">Note<input id="if-note" placeholder="Sept 25 check, 42 OT hours"></label>
       <div id="if-preview">${incomePreviewHtml()}</div>
       <label class="check small"><input type="checkbox" id="if-bal" checked> Add it to my account balances this way</label>
+      <label class="check small"><input type="checkbox" id="if-fill" ${P.autoFill===false?"":"checked"}> Fill savings buckets in order (top of the list first)</label>
       <button class="btn" type="submit">Add income</button>
     </form>
     ${split}
     <div class="kv" style="margin-top:8px"><span>${esc(t.toLocaleDateString("en-US",{month:"long"}))} so far</span><b>${m2(mtot)}</b></div>
     ${list.length?`<details><summary class="small"><b>Income history (${list.length})</b></summary><div class="list">${list.slice(0,30).map(x=>`<div class="item"><div class="grow"><div>${esc(src[x.src]||"Income")}</div>
-      <div class="muted small">${short(dn(x.date))}${x.note?" · "+esc(x.note):""}${x.card?` · to ${esc(x.card)}`:x.to!==""&&x.to!=null&&goals[x.to]?` · to ${esc(goals[x.to].name)}`:""}</div></div>
+      <div class="muted small">${short(dn(x.date))}${x.note?" · "+esc(x.note):""}${x.card?` · to ${esc(x.card)}`:x.to!==""&&x.to!=null&&goals[x.to]?` · to ${esc(goals[x.to].name)}`:""}${x.fill?` · buckets: ${x.fill.map(f=>`${esc(f.name)} ${m0(f.amt)}`).join(", ")}`:""}</div></div>
       <b class="num">${m2(x.amt)}</b><button class="x" data-act="delinc" data-id="${esc(x.id)}">Delete</button></div>`).join("")}</div></details>`:""}
   </div>`;
 }
@@ -909,6 +912,24 @@ function depositPlan(amt,src,dateS,goal){
   const d=dn(dateS||todayS()),end=Math.max(d,dn(todayS()))+14,due=chaseDueUntil(end),chase=acctBal("chase");
   let move=0;if(r.cover&&r.home!=="chase"){const short=Math.max(0,due.sum-chase-(out.chase||0));move=Math.min(short,out[r.home]||0);if(move>0){add(r.home,-move);add("chase",move)}}
   return {out,auto,spend,move,due,chase,end,rule:r};
+}
+/* What lands in savings fills the buckets top to bottom, but never the part that would leave savings under the floor. */
+function bucketFill(amt,saveAfter){
+  const P=S.plan,r=v=>Math.round(v*100)/100,floor=+P.floor||0;
+  const room=Math.max(0,r(saveAfter-floor));let left=r(Math.min(amt,room));const held=r(amt-left),fills=[];
+  (P.goals||[]).forEach((g,i)=>{if(left<=0.004||g.done)return;const need=r((+g.target||0)-(+g.saved||0));if(need<=0.004)return;
+    const v=r(Math.min(need,left));fills.push({i,name:g.name,amt:v});left=r(left-v)});
+  return {fills,left,held};
+}
+function fillPreviewHtml(s){
+  const save=s.out.usaa||0;if(!(save>0))return "";
+  const fe=document.getElementById("if-fill");if(fe?!fe.checked:S.plan.autoFill===false)return "";
+  const bf=bucketFill(save,acctBal("usaa")+save),lb=L();
+  return `<div class="label" style="margin-top:8px">Savings buckets</div><div class="ledger">
+    ${bf.fills.map(f=>`<div><span>${esc(f.name)}</span><b style="color:var(--good)">+${m2(f.amt)}</b></div>`).join("")}
+    ${bf.held>0.004?`<div><span class="muted">Kept to stay above the ${m0(+S.plan.floor||0)} floor</span><b class="muted">${m2(bf.held)}</b></div>`:""}
+    ${bf.left>0.004?`<div><span class="muted">Free in ${esc(lb.save)} (buckets are full)</span><b class="muted">${m2(bf.left)}</b></div>`:""}
+    ${!bf.fills.length&&bf.held<=0.004&&bf.left<=0.004?`<div><span class="muted">Nothing to fill</span><b></b></div>`:""}</div>`;
 }
 function depositCard(){
   const src=S.depSrc||"mine",r=depRule(src),lb=L();
@@ -1409,6 +1430,7 @@ document.addEventListener("click",async e=>{
   if(a==="delinc"){if(!arm(b))return;const inc=(S.plan.income||[]).find(x=>String(x.id)===b.dataset.id);if(!inc)return;
     if(inc.to!==""&&inc.to!=null&&S.plan.goals?.[inc.to]){const g=S.plan.goals[inc.to];g.saved=Math.round(((+g.saved||0)-inc.amt)*100)/100}
     if(inc.applied)for(const [k,v] of Object.entries(inc.applied))acctAdjust(k,-(+v||0));
+    for(const x of inc.fill||[]){const g=(S.plan.goals||[]).find(g=>g.name===x.name);if(g)g.saved=Math.max(0,Math.round(((+g.saved||0)-x.amt)*100)/100)}
     S.plan.income=S.plan.income.filter(x=>x!==inc);render();savePlan();return}
   if(a==="gtake"){const i=+b.dataset.i;const v=num(document.getElementById("gadd-"+i).value);if(!(v>0)){toast("Enter an amount first");return}
     const g=S.plan.goals[i];g.saved=Math.round(((+g.saved||0)-v)*100)/100;render();savePlan();toast(`${m0(v)} taken out of ${g.name}`);return}
@@ -1563,11 +1585,15 @@ document.addEventListener("submit",async e=>{
       catch(err){fail(err);if(btn){btn.disabled=false;btn.textContent="Add income"}}
       return}
     const inc={id:Date.now(),src:val("if-src"),amt,date:val("if-date")||todayS(),note:val("if-note").trim().slice(0,80),to:to===""?"":+to};
-    if(document.getElementById("if-bal")?.checked){const d=depositPlan(amt,inc.src,inc.date,inc.to!=="");
-      for(const [k,v] of Object.entries(d.out))acctAdjust(k,v);inc.applied=d.out}
+    const d=depositPlan(amt,inc.src,inc.date,inc.to!=="");
+    if(inc.to===""&&document.getElementById("if-fill")?.checked&&(d.out.usaa||0)>0){
+      const bf=bucketFill(d.out.usaa,acctBal("usaa")+d.out.usaa);
+      for(const x of bf.fills){const g=S.plan.goals[x.i];g.saved=Math.round(((+g.saved||0)+x.amt)*100)/100}
+      if(bf.fills.length)inc.fill=bf.fills.map(x=>({name:x.name,amt:x.amt}))}
+    if(document.getElementById("if-bal")?.checked){for(const [k,v] of Object.entries(d.out))acctAdjust(k,v);inc.applied=d.out}
     (S.plan.income||(S.plan.income=[])).push(inc);S.plan.income=S.plan.income.slice(-200);
     if(inc.to!==""&&S.plan.goals?.[inc.to]){const g=S.plan.goals[inc.to];g.saved=Math.round(((+g.saved||0)+amt)*100)/100}
-    render();savePlan();toast(`Added ${m2(amt)}`)}
+    render();savePlan();toast(inc.fill?`Added ${m2(amt)}. Buckets: ${inc.fill.map(x=>`${x.name} +${m0(x.amt)}`).join(", ")}`:`Added ${m2(amt)}`)}
   if(f.id==="scf"){const amt=num(val("sc-amt"));if(!(amt>0)){toast("Enter an amount");return}S.scen=runScenario(amt,val("sc-pool"));render()}
   if(f.id==="goaledit"){const i=+f.dataset.i,g=S.plan.goals[i];const name=val("ge-name").trim();if(!name){toast("Give it a name");return}
     g.name=name;g.target=num(val("ge-target"))||0;g.monthly=num(val("ge-monthly"))||0;const sv=num(val("ge-saved"));if(isFinite(sv))g.saved=sv;g.when=val("ge-when").trim();
@@ -1826,7 +1852,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202610051133";
+const BUILD="202610070940";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
