@@ -74,6 +74,7 @@ label.f{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:60
 input,select{font:inherit;font-size:16px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 11px;width:100%}
 input:not([type=checkbox]):not([type=radio]):not([type=file]),select{box-sizing:border-box;min-width:0;max-width:100%;height:46px;line-height:1.2}
 label.f{min-width:0}
+.sc-check{padding:10px 0;border-bottom:1px solid var(--line)}.sc-head{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap}.sc-head>span{margin-left:auto;color:var(--muted)}.sc-head>span b{color:var(--ink)}
 /* iPhone date fields ignore width and center their text; make them match the other fields */
 input[type=date]{-webkit-appearance:none;appearance:none;display:block;text-align:left}
 input[type=date]::-webkit-date-and-time-value{text-align:left;margin:0}
@@ -1009,46 +1010,69 @@ function afterTab(){
   </section>`;
 }
 /* Rest-of-month projection: balances after bills, plus the base checks still to come this month, minus the spending refills still to go out, plus whatever OT or drill pay the person types in. */
-function basePay(){const P=S.plan,b=P.basePay||{};return {aspen:b.aspen??(+P.paycheck?.aspen||0),grace:b.grace??(+P.paycheck?.grace||0)}}
+/* Rest-of-month projection, built like a paycheck calculator: hours at base and overtime rates, a flat tax estimate,
+   as many checks as the month needs. Starts from balances after this month's unpaid bills and takes out the spending refills still to go. */
+function payCalc(){
+  const P=S.plan,d=new Date(),mk=`${d.getFullYear()}-${pad(d.getMonth()+1)}`;
+  const pc=P.payCalc=P.payCalc||{rate:34.32,ot:51.46,tax:30,grace:+P.paycheck?.grace||0,drill:0};
+  if(pc.month!==mk||!Array.isArray(pc.rows)){pc.month=mk;pc.drill=0;pc.rows=monthPays().map(()=>({base:80,ot:0}));if(!pc.rows.length)pc.rows=[{base:80,ot:0}]}
+  return pc;
+}
+function monthEnd(){const d=new Date();return Math.round(Date.UTC(d.getFullYear(),d.getMonth()+1,0)/DAY)}
+function monthPays(){const out=[],end=monthEnd();for(let p=nextPayday();p<=end;p+=14)out.push(p);return out}
+function checkNet(r,pc){const r2=v=>Math.round(v*100)/100,gross=r2((+r.base||0)*(+pc.rate||0)+(+r.ot||0)*(+pc.ot||0));return {gross,net:r2(gross*(1-(+pc.tax||0)/100))}}
 function monthScen(){
-  const P=S.plan,r2=v=>Math.round(v*100)/100,t=dn(todayS()),d=new Date(),end=Math.round(Date.UTC(d.getFullYear(),d.getMonth()+1,0)/DAY);
-  const pays=[];for(let p=nextPayday();p<=end;p+=14)pays.push(p);
-  const bp=basePay(),inA=r2(pays.length*bp.aspen),inG=r2(pays.length*bp.grace);
-  const c=compute(),per=POOLS.reduce((s,p)=>s+c[p].budget,0),forced=forcedStarts(),refills=[];
-  for(let w=nextReset();w<=end;w=stepFrom(w,forced))refills.push(w);
-  const spend=r2(refills.length*per);
+  const P=S.plan,r2=v=>Math.round(v*100)/100,pc=payCalc(),end=monthEnd(),pays=monthPays();
+  const checks=pc.rows.map((r,i)=>({...checkNet(r,pc),date:pays[i]}));
+  const inA=r2(checks.reduce((s,x)=>s+x.net,0)),inG=r2(pays.length*(+pc.grace||0)),drill=+pc.drill||0;
+  const c=compute(),per=POOLS.reduce((s,p)=>s+c[p].budget,0),forced=forcedStarts();let n=0;
+  for(let w=nextReset();w<=end;w=stepFrom(w,forced))n++;
+  const spend=r2(n*per);
   const after=r2(acctList().reduce((s,a)=>s+acctBal(a.k),0)-billRows().filter(r=>!r.paid).reduce((s,r)=>s+billLeft(r.b,r.key),0));
-  const sc=S.afterScen||{},ot=+sc.ot||0,drill=+sc.drill||0;
-  const endTot=r2(after+inA+inG+ot+drill-spend);
-  return {pays,bp,inA,inG,refills,spend,after,ot,drill,endTot,free:r2(endTot-(+P.floor||0)),end};
+  const endTot=r2(after+inA+inG+drill-spend);
+  return {checks,inA,inG,gn:pays.length,drill,n,spend,after,endTot,free:r2(endTot-(+P.floor||0)),end};
 }
 function scenOutHtml(){
-  const s=monthScen(),lb=L(),mon=new Date().toLocaleDateString("en-US",{month:"long"});
+  const s=monthScen(),mon=new Date().toLocaleDateString("en-US",{month:"long"});
   return `<div class="split">
     <span>Left after ${esc(mon)}'s bills</span><b class="num">${m2(s.after)}</b>
-    <span>${esc(NAMES.aspen)}'s base checks (${s.pays.length}${s.pays.length?": "+s.pays.map(short).join(", "):""})</span><b class="num">+${m2(s.inA)}</b>
-    <span>${esc(NAMES.grace)}'s checks (${s.pays.length})</span><b class="num">+${m2(s.inG)}</b>
-    ${s.ot?`<span>Overtime</span><b class="num">+${m2(s.ot)}</b>`:""}
+    <span>${esc(NAMES.aspen)}'s checks (${s.checks.length}), after taxes</span><b class="num">+${m2(s.inA)}</b>
+    <span>${esc(NAMES.grace)}'s checks (${s.gn})</span><b class="num">+${m2(s.inG)}</b>
     ${s.drill?`<span>Drill pay</span><b class="num">+${m2(s.drill)}</b>`:""}
-    <span>Spending refills left (${s.refills.length})</span><b class="num">−${m2(s.spend)}</b>
+    <span>Spending refills left (${s.n})</span><b class="num">−${m2(s.spend)}</b>
     <span class="tot">End of ${esc(mon)}, all accounts</span><b class="num tot">${m2(s.endTot)}</b>
     <span class="tot">Above the ${m0(+S.plan.floor||0)} floor</span><b class="num tot" style="color:${s.free<0?"var(--bad)":"var(--good)"}">${m2(s.free)}</b></div>
-    <div class="small muted" style="margin-top:8px">That's what you'd have for buckets and extras by ${short(s.end)} if spending stays on budget. Checks after ${short(s.end)} aren't counted.</div>`;
+    <div class="small muted" style="margin-top:8px">A snapshot on ${short(s.end)} if spending stays on budget. Next month's bills start right after, so this is what the buckets can fill, not spare cash.</div>`;
 }
-document.addEventListener("input",e=>{const id=e.target.id;if(!["sc-ot","sc-drill","sc-baseA","sc-baseG"].includes(id)||!S.plan)return;
-  const v=num(e.target.value),x=isFinite(v)?v:0;
-  if(id==="sc-ot"||id==="sc-drill"){S.afterScen=S.afterScen||{};S.afterScen[id==="sc-ot"?"ot":"drill"]=x}
-  else{const P=S.plan;P.basePay={...basePay(),[id==="sc-baseA"?"aspen":"grace"]:x};clearTimeout(S.baseT);S.baseT=setTimeout(savePlan,800)}
-  const el=document.getElementById("scen-out");if(el)el.innerHTML=scenOutHtml()});
+function scenRowsHtml(){
+  const pc=payCalc(),pays=monthPays();
+  return pc.rows.map((r,i)=>{const x=checkNet(r,pc);return `<div class="sc-check">
+    <div class="sc-head"><b>${pays[i]!=null?`Check ${short(pays[i])}`:`Extra check ${i+1}`}</b>
+      <span class="num small" id="sc-net-${i}">${m2(x.gross)} gross · <b>${m2(x.net)}</b> take-home</span>
+      ${pc.rows.length>1?`<button class="x" type="button" data-act="scdel" data-i="${i}" aria-label="Remove this check">✕</button>`:""}</div>
+    <div class="row"><label class="f">Base hours<input class="sc-in" data-i="${i}" data-k="base" inputmode="decimal" value="${esc(r.base??"")}"></label>
+      <label class="f">Overtime hours<input class="sc-in" data-i="${i}" data-k="ot" inputmode="decimal" value="${esc(r.ot||"")}" placeholder="0"></label></div></div>`}).join("");
+}
+document.addEventListener("input",e=>{const el=e.target;if(!S.plan)return;
+  const isRow=el.classList?.contains("sc-in"),isSet=el.dataset?.pc!=null;if(!isRow&&!isSet)return;
+  const pc=payCalc(),v=num(el.value),x=isFinite(v)?v:0;
+  if(isRow){pc.rows[+el.dataset.i][el.dataset.k]=x;const n=checkNet(pc.rows[+el.dataset.i],pc),t=document.getElementById("sc-net-"+el.dataset.i);if(t)t.innerHTML=`${m2(n.gross)} gross · <b>${m2(n.net)}</b> take-home`}
+  else{pc[el.dataset.pc]=x;if(["rate","ot","tax"].includes(el.dataset.pc))pc.rows.forEach((r,i)=>{const n=checkNet(r,pc),t=document.getElementById("sc-net-"+i);if(t)t.innerHTML=`${m2(n.gross)} gross · <b>${m2(n.net)}</b> take-home`})}
+  const o=document.getElementById("scen-out");if(o)o.innerHTML=scenOutHtml();
+  clearTimeout(S.pcT);S.pcT=setTimeout(savePlan,800)});
 function scenCard(){
-  const bp=basePay(),sc=S.afterScen||{},mon=new Date().toLocaleDateString("en-US",{month:"long"});
+  const pc=payCalc(),mon=new Date().toLocaleDateString("en-US",{month:"long"});
   return `<div class="card"><h2>Rest of ${esc(mon)}</h2>
-    <div class="small muted">Base pay only, then add overtime and drill to see where you'd land.</div>
-    <div class="row" style="margin-top:10px"><label class="f">${esc(NAMES.aspen)}'s base check<input id="sc-baseA" inputmode="decimal" value="${esc(bp.aspen)}"></label>
-      <label class="f">${esc(NAMES.grace)}'s check<input id="sc-baseG" inputmode="decimal" value="${esc(bp.grace)}"></label></div>
-    <div class="row"><label class="f">Overtime pay this month ($)<input id="sc-ot" inputmode="decimal" placeholder="0" value="${sc.ot?esc(sc.ot):""}"></label>
-      <label class="f">Drill pay this month ($)<input id="sc-drill" inputmode="decimal" placeholder="0" value="${sc.drill?esc(sc.drill):""}"></label></div>
-    <div id="scen-out" style="margin-top:6px">${scenOutHtml()}</div>
+    <div class="small muted">Enter the hours for each check to see where you'd land.</div>
+    <div id="sc-rows" style="margin-top:10px">${scenRowsHtml()}</div>
+    <button class="btn sm ghost" type="button" data-act="scadd" style="margin-top:4px">+ Add a check</button>
+    <div class="row" style="margin-top:12px"><label class="f">${esc(NAMES.grace)}'s check<input data-pc="grace" inputmode="decimal" value="${esc(pc.grace??"")}"></label>
+      <label class="f">Drill pay this month ($)<input data-pc="drill" inputmode="decimal" placeholder="0" value="${pc.drill?esc(pc.drill):""}"></label></div>
+    <details style="margin-top:6px"><summary class="small"><b>Pay rates and taxes</b> · ${m2(+pc.rate||0)}/hr, OT ${m2(+pc.ot||0)}/hr, ${+pc.tax||0}% taxes</summary>
+      <div class="row" style="margin-top:8px"><label class="f">Base rate<input data-pc="rate" inputmode="decimal" value="${esc(pc.rate)}"></label>
+        <label class="f">Overtime rate<input data-pc="ot" inputmode="decimal" value="${esc(pc.ot)}"></label>
+        <label class="f">Taxes (%)<input data-pc="tax" inputmode="decimal" value="${esc(pc.tax)}"></label></div></details>
+    <div id="scen-out" style="margin-top:12px">${scenOutHtml()}</div>
   </div>`;
 }
 function vaultTab(){
@@ -1474,6 +1498,8 @@ document.addEventListener("click",async e=>{
   if(a==="seespend"){const on=!S.settings?.seeSpending;try{await saveSettings({seeSpending:on});await LOAD.txns();render();toast(on?"You can both see each other's spending":"Spending details are private again")}catch(err){fail(err)}return}
   if(a==="access"){try{await saveSettings({partnerFull:b.dataset.v==="full"});toast(b.dataset.v==="full"?`${NAMES.grace} can now see everything`:`${NAMES.grace} sees just their money`)}catch(err){fail(err)}return}
   if(a==="gshide"){if(!arm(b,"Tap again to hide"))return;try{await saveSettings({onboardDone:true})}catch(err){fail(err)}return}
+  if(a==="scadd"){payCalc().rows.push({base:80,ot:0});render();savePlan();return}
+  if(a==="scdel"){const pc=payCalc();pc.rows.splice(+b.dataset.i,1);render();savePlan();return}
   if(a==="tab"){S.tab=b.dataset.t;try{localStorage.setItem("mfb-tab",S.tab)}catch(_){}render();return}
   if(a==="view"){S.view=b.dataset.v;render();window.scrollTo(0,0);return}
   if(a==="pool"){e.preventDefault();if(S.view==="grace")S.gPool=b.dataset.p;else S.aPool=b.dataset.p;render();document.getElementById("lf-amt")?.focus();return}
@@ -1949,7 +1975,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202610071004";
+const BUILD="202610071013";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
