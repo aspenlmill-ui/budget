@@ -413,9 +413,9 @@ function txList(list,grace,noEmpty){
 }
 
 function aspenView(){
-  const tabs=[["week","Home"],["special","Special"],["move","Move"],["bills","Bills"],["vault","Vault"],["plan","Plan"],["history","History"],["setup","Setup"]];
+  const tabs=[["week","Home"],["after","After bills"],["special","Special"],["move","Move"],["bills","Bills"],["vault","Vault"],["plan","Plan"],["history","History"],["setup","Setup"]];
   let body="";
-  if(S.tab==="move")body=moveTab();else if(S.tab==="special")body=specialTab();else if(S.tab==="plan")body=planTab();else if(S.tab==="vault")body=vaultTab();else if(S.tab==="bills")body=billsTab();else if(S.tab==="setup")body=setupTab();else if(S.tab==="history")body=historyTab();else body=weekTab();
+  if(S.tab==="after")body=afterTab();else if(S.tab==="move")body=moveTab();else if(S.tab==="special")body=specialTab();else if(S.tab==="plan")body=planTab();else if(S.tab==="vault")body=vaultTab();else if(S.tab==="bills")body=billsTab();else if(S.tab==="setup")body=setupTab();else if(S.tab==="history")body=historyTab();else body=weekTab();
   const c=compute();
   return `<header><div><div class="label">${esc(weekLine(c))}</div><h1 class="brand"><img src="icon.svg" alt="" class="logo">${esc(S.settings?.title||"Family Budget")}</h1></div><button class="btn ghost sm" data-act="simpleview" data-v="1">Simple view</button></header>
   <nav class="tabs" role="tablist">${tabs.map(([k,l])=>`<button role="tab" data-act="tab" data-t="${k}" aria-selected="${S.tab===k}">${l}</button>`).join("")}</nav>
@@ -954,6 +954,51 @@ function depositCard(){
 }
 function depositSummary(amt,src){const d=depositPlan(amt,src);const parts=Object.entries(d.out).filter(([,v])=>v>0).map(([k,v])=>`${m0(v)} to ${acctName(k)}`);if(d.spend)parts.push(`${m0(d.spend)} spending refill`);return parts.join(", ")||"nothing"}
 function billAcct(b){if(b.from==="savings")return "usaa";if(String(b.from).startsWith("x:")&&(S.plan?.otherAccts||[]).some(a=>"x:"+a.id===b.from))return b.from;return "chase"}
+/* ---------- After bills: every account as if all of this month's unpaid bills were already paid ---------- */
+function afterTab(){
+  const P=S.plan;if(!P)return planTab();
+  const lb=L(),floor=+P.floor||0,r2=v=>Math.round(v*100)/100;
+  const rows=billRows().filter(r=>!r.paid).map(r=>({name:r.b.name,due:r.due,acct:billAcct(r.b),amt:billLeft(r.b,r.key),late:r.late})).filter(x=>x.amt>0.004)
+    .sort((a,b)=>(a.due??1e9)-(b.due??1e9));
+  const accts=acctList().map(a=>{const bal=acctBal(a.k),mine=rows.filter(x=>x.acct===a.k),due=r2(mine.reduce((s,x)=>s+x.amt,0));return {...a,bal,due,n:mine.length,left:r2(bal-due)}});
+  const total=r2(accts.reduce((s,a)=>s+a.left,0)),dueAll=r2(rows.reduce((s,x)=>s+x.amt,0));
+  const sav=accts.find(a=>a.k==="usaa"),free=r2(sav.left-floor);
+  const goals=(P.goals||[]).filter(g=>!g.done&&(+g.target||0)-(+g.saved||0)>0.004);
+  const need=r2(goals.reduce((s,g)=>s+(+g.target||0)-(+g.saved||0),0));
+  const c=compute(),spendLeft=r2(POOLS.reduce((s,p)=>s+Math.max(0,c[p].left),0));
+  const mon=new Date().toLocaleDateString("en-US",{month:"long"});
+  return `<section>
+    <div class="card"><h2>After this month's bills</h2>
+      <div class="small muted">What every account would have if all of ${esc(mon)}'s unpaid bills came out today.</div>
+      <div class="spend-left${total<0?" neg":""}" style="margin-top:10px"><span>Left across all accounts</span><b class="num">${m2(total)}</b></div>
+      <div class="kv small"><span class="muted">Bills still to come out in ${esc(mon)}</span><b>${m2(dueAll)}</b></div>
+    </div>
+
+    <div class="card"><h2>By account</h2>
+      ${accts.map(a=>`<div class="split" style="margin-bottom:10px"><span class="label" style="grid-column:1/-1">${esc(a.name)}</span>
+        <span>Balance now</span><b class="num">${m2(a.bal)}</b>
+        <span>Bills left (${a.n})</span><b class="num">${a.due?"−"+m2(a.due):m2(0)}</b>
+        <span class="tot">After bills</span><b class="num tot" style="color:${a.left<0?"var(--bad)":"var(--good)"}">${m2(a.left)}</b></div>
+        ${a.left<0?`<span class="chip bad" style="margin-bottom:10px">Short ${m2(-a.left)}. Move money in before the bills hit.</span>`:""}`).join("")}
+    </div>
+
+    <div class="card"><h2>${esc(lb.save)} after bills</h2>
+      <div class="split"><span>${esc(lb.save)} after bills</span><b class="num">${m2(sav.left)}</b>
+        <span>Protected floor</span><b class="num">−${m2(floor)}</b>
+        <span class="tot">Free to use</span><b class="num tot" style="color:${free<0?"var(--bad)":"var(--good)"}">${m2(free)}</b>
+        <span>Buckets still need</span><b class="num">${m2(need)}</b></div>
+      <span class="chip ${free<0?"bad":free<300?"warn":""}" style="margin-top:8px">${free<0?`${m2(-free)} under the floor once bills clear. Hold off on extras.`:free<300?"Tight until the next paycheck":"Floor is safe after bills"}</span>
+      ${spendLeft>0?`<div class="small muted" style="margin-top:8px">Spending money left on the cards ${esc(PER().this||"this week")}: ${m2(spendLeft)}. Weekly refills also come out of ${esc(lb.save)} as the month goes on.</div>`:""}
+    </div>
+
+    <div class="card"><h2>Bills still to come out</h2>
+      ${rows.length?`<div class="list">${rows.map(x=>`<div class="item"><div class="grow"><div>${esc(x.name)}${x.late?` <span class="chip bad">Late</span>`:""}</div>
+        <div class="muted small">${x.due!=null?short(x.due):"No due day"} · ${esc(acctName(x.acct))}</div></div><b class="num">${m2(x.amt)}</b></div>`).join("")}</div>`
+        :`<div class="small muted">Everything for ${esc(mon)} is paid.</div>`}
+      <div class="small muted" style="margin-top:8px">Mark bills paid on the Bills tab and they drop off here.</div>
+    </div>
+  </section>`;
+}
 function vaultTab(){
   const P=S.plan;if(!P)return planTab();
   const lb=L(),sav=acctBal("usaa"),bills=acctBal("chase"),floor=+P.floor||0,goals=P.goals||[],others=P.otherAccts||[];
@@ -1852,7 +1897,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202610070940";
+const BUILD="202610070946";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
