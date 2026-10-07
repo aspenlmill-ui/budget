@@ -413,7 +413,7 @@ function txList(list,grace,noEmpty){
 }
 
 function aspenView(){
-  const tabs=[["week","Home"],["after","After bills"],["special","Special"],["move","Move"],["bills","Bills"],["vault","Vault"],["plan","Plan"],["history","History"],["setup","Setup"]];
+  const tabs=[["week","Home"],["special","Special"],["move","Move"],["bills","Bills"],["vault","Vault"],["plan","Plan"],["history","History"],["setup","Setup"],["after","After bills"]];
   let body="";
   if(S.tab==="after")body=afterTab();else if(S.tab==="move")body=moveTab();else if(S.tab==="special")body=specialTab();else if(S.tab==="plan")body=planTab();else if(S.tab==="vault")body=vaultTab();else if(S.tab==="bills")body=billsTab();else if(S.tab==="setup")body=setupTab();else if(S.tab==="history")body=historyTab();else body=weekTab();
   const c=compute();
@@ -974,6 +974,8 @@ function afterTab(){
       <div class="kv small"><span class="muted">Bills still to come out in ${esc(mon)}</span><b>${m2(dueAll)}</b></div>
     </div>
 
+    ${scenCard()}
+
     <div class="card"><h2>By account</h2>
       ${accts.map(a=>`<div class="split" style="margin-bottom:10px"><span class="label" style="grid-column:1/-1">${esc(a.name)}</span>
         <span>Balance now</span><b class="num">${m2(a.bal)}</b>
@@ -998,6 +1000,49 @@ function afterTab(){
       <div class="small muted" style="margin-top:8px">Mark bills paid on the Bills tab and they drop off here.</div>
     </div>
   </section>`;
+}
+/* Rest-of-month projection: balances after bills, plus the base checks still to come this month, minus the spending refills still to go out, plus whatever OT or drill pay the person types in. */
+function basePay(){const P=S.plan,b=P.basePay||{};return {aspen:b.aspen??(+P.paycheck?.aspen||0),grace:b.grace??(+P.paycheck?.grace||0)}}
+function monthScen(){
+  const P=S.plan,r2=v=>Math.round(v*100)/100,t=dn(todayS()),d=new Date(),end=Math.round(Date.UTC(d.getFullYear(),d.getMonth()+1,0)/DAY);
+  const pays=[];for(let p=nextPayday();p<=end;p+=14)pays.push(p);
+  const bp=basePay(),inA=r2(pays.length*bp.aspen),inG=r2(pays.length*bp.grace);
+  const c=compute(),per=POOLS.reduce((s,p)=>s+c[p].budget,0),forced=forcedStarts(),refills=[];
+  for(let w=nextReset();w<=end;w=stepFrom(w,forced))refills.push(w);
+  const spend=r2(refills.length*per);
+  const after=r2(acctList().reduce((s,a)=>s+acctBal(a.k),0)-billRows().filter(r=>!r.paid).reduce((s,r)=>s+billLeft(r.b,r.key),0));
+  const sc=S.afterScen||{},ot=+sc.ot||0,drill=+sc.drill||0;
+  const endTot=r2(after+inA+inG+ot+drill-spend);
+  return {pays,bp,inA,inG,refills,spend,after,ot,drill,endTot,free:r2(endTot-(+P.floor||0)),end};
+}
+function scenOutHtml(){
+  const s=monthScen(),lb=L(),mon=new Date().toLocaleDateString("en-US",{month:"long"});
+  return `<div class="split">
+    <span>Left after ${esc(mon)}'s bills</span><b class="num">${m2(s.after)}</b>
+    <span>${esc(NAMES.aspen)}'s base checks (${s.pays.length}${s.pays.length?": "+s.pays.map(short).join(", "):""})</span><b class="num">+${m2(s.inA)}</b>
+    <span>${esc(NAMES.grace)}'s checks (${s.pays.length})</span><b class="num">+${m2(s.inG)}</b>
+    ${s.ot?`<span>Overtime</span><b class="num">+${m2(s.ot)}</b>`:""}
+    ${s.drill?`<span>Drill pay</span><b class="num">+${m2(s.drill)}</b>`:""}
+    <span>Spending refills left (${s.refills.length})</span><b class="num">−${m2(s.spend)}</b>
+    <span class="tot">End of ${esc(mon)}, all accounts</span><b class="num tot">${m2(s.endTot)}</b>
+    <span class="tot">Above the ${m0(+S.plan.floor||0)} floor</span><b class="num tot" style="color:${s.free<0?"var(--bad)":"var(--good)"}">${m2(s.free)}</b></div>
+    <div class="small muted" style="margin-top:8px">That's what you'd have for buckets and extras by ${short(s.end)} if spending stays on budget. Checks after ${short(s.end)} aren't counted.</div>`;
+}
+document.addEventListener("input",e=>{const id=e.target.id;if(!["sc-ot","sc-drill","sc-baseA","sc-baseG"].includes(id)||!S.plan)return;
+  const v=num(e.target.value),x=isFinite(v)?v:0;
+  if(id==="sc-ot"||id==="sc-drill"){S.afterScen=S.afterScen||{};S.afterScen[id==="sc-ot"?"ot":"drill"]=x}
+  else{const P=S.plan;P.basePay={...basePay(),[id==="sc-baseA"?"aspen":"grace"]:x};clearTimeout(S.baseT);S.baseT=setTimeout(savePlan,800)}
+  const el=document.getElementById("scen-out");if(el)el.innerHTML=scenOutHtml()});
+function scenCard(){
+  const bp=basePay(),sc=S.afterScen||{},mon=new Date().toLocaleDateString("en-US",{month:"long"});
+  return `<div class="card"><h2>Rest of ${esc(mon)}</h2>
+    <div class="small muted">Base pay only, then add overtime and drill to see where you'd land.</div>
+    <div class="row" style="margin-top:10px"><label class="f">${esc(NAMES.aspen)}'s base check<input id="sc-baseA" inputmode="decimal" value="${esc(bp.aspen)}"></label>
+      <label class="f">${esc(NAMES.grace)}'s check<input id="sc-baseG" inputmode="decimal" value="${esc(bp.grace)}"></label></div>
+    <div class="row"><label class="f">Overtime this month<input id="sc-ot" inputmode="decimal" placeholder="0" value="${sc.ot?esc(sc.ot):""}"></label>
+      <label class="f">Drill pay this month<input id="sc-drill" inputmode="decimal" placeholder="0" value="${sc.drill?esc(sc.drill):""}"></label></div>
+    <div id="scen-out" style="margin-top:6px">${scenOutHtml()}</div>
+  </div>`;
 }
 function vaultTab(){
   const P=S.plan;if(!P)return planTab();
@@ -1897,7 +1942,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202610070946";
+const BUILD="202610070959";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
