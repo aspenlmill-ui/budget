@@ -1046,8 +1046,8 @@ function scenCard(){
     <div class="small muted">Base pay only, then add overtime and drill to see where you'd land.</div>
     <div class="row" style="margin-top:10px"><label class="f">${esc(NAMES.aspen)}'s base check<input id="sc-baseA" inputmode="decimal" value="${esc(bp.aspen)}"></label>
       <label class="f">${esc(NAMES.grace)}'s check<input id="sc-baseG" inputmode="decimal" value="${esc(bp.grace)}"></label></div>
-    <div class="row"><label class="f">Overtime this month<input id="sc-ot" inputmode="decimal" placeholder="0" value="${sc.ot?esc(sc.ot):""}"></label>
-      <label class="f">Drill pay this month<input id="sc-drill" inputmode="decimal" placeholder="0" value="${sc.drill?esc(sc.drill):""}"></label></div>
+    <div class="row"><label class="f">Overtime pay this month ($)<input id="sc-ot" inputmode="decimal" placeholder="0" value="${sc.ot?esc(sc.ot):""}"></label>
+      <label class="f">Drill pay this month ($)<input id="sc-drill" inputmode="decimal" placeholder="0" value="${sc.drill?esc(sc.drill):""}"></label></div>
     <div id="scen-out" style="margin-top:6px">${scenOutHtml()}</div>
   </div>`;
 }
@@ -1949,7 +1949,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202610071001";
+const BUILD="202610071004";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
