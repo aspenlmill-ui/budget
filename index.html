@@ -1042,6 +1042,11 @@ function scenOutHtml(){
     <span>Spending refills left (${s.n})</span><b class="num">−${m2(s.spend)}</b>
     <span class="tot">End of ${esc(mon)}, all accounts</span><b class="num tot">${m2(s.endTot)}</b>
     <span class="tot">Above the ${m0(+S.plan.floor||0)} floor</span><b class="num tot" style="color:${s.free<0?"var(--bad)":"var(--good)"}">${m2(s.free)}</b></div>
+    ${(()=>{const r2=v=>Math.round(v*100)/100;let left=Math.max(0,s.free);const fills=[];
+      for(const g of S.plan.goals||[]){if(left<=0.004||g.done)continue;const need=r2((+g.target||0)-(+g.saved||0));if(need<=0.004)continue;const v=r2(Math.min(need,left));fills.push({g,v,need});left=r2(left-v)}
+      return `<div class="label" style="margin-top:12px">If that went into the buckets</div><div class="split">
+        ${fills.map(f=>`<span>${esc(f.g.name)}${f.v<f.need-0.004?` <span class="muted small">(${m0(f.v)} of ${m0(f.need)})</span>`:` <span class="muted small">(full)</span>`}</span><b class="num">−${m2(f.v)}</b>`).join("")}
+        <span class="tot">Left after buckets</span><b class="num tot" style="color:${left>0.004?"var(--good)":"inherit"}">${m2(left)}</b></div>`})()}
     <div class="small muted" style="margin-top:8px">A snapshot on ${short(s.end)} if spending stays on budget. Next month's bills start right after, so this is what the buckets can fill, not spare cash.</div>`;
 }
 function scenRowsHtml(){
@@ -1975,7 +1980,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202610071013";
+const BUILD="202610071022";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
