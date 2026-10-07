@@ -988,7 +988,8 @@ function afterTab(){
       <div class="split"><span>${esc(lb.save)} after bills</span><b class="num">${m2(sav.left)}</b>
         <span>Protected floor</span><b class="num">−${m2(floor)}</b>
         <span class="tot">Free to use</span><b class="num tot" style="color:${free<0?"var(--bad)":"var(--good)"}">${m2(free)}</b>
-        <span>Buckets still need</span><b class="num">${m2(need)}</b></div>
+        ${goals.slice(0,3).map((g,i)=>`<span>${i?"Then":"Next up"}: ${esc(g.name)}</span><b class="num">${m2((+g.target||0)-(+g.saved||0))}</b>`).join("")}</div>
+      ${goals.length>3?`<div class="small muted" style="margin-top:6px">Every bucket on the list adds up to ${m0(need)}, but that's the whole plan through 2027 (GMC, real fence, emergency fund). It's not due this month.</div>`:""}
       <span class="chip ${free<0?"bad":free<300?"warn":""}" style="margin-top:8px">${free<0?`${m2(-free)} under the floor once bills clear. Hold off on extras.`:free<300?"Tight until the next paycheck":"Floor is safe after bills"}</span>
       ${spendLeft>0?`<div class="small muted" style="margin-top:8px">Spending money left on the cards ${esc(PER().this||"this week")}: ${m2(spendLeft)}. Weekly refills also come out of ${esc(lb.save)} as the month goes on.</div>`:""}
     </div>
@@ -1942,7 +1943,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202610070959";
+const BUILD="202610071000";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
