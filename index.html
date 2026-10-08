@@ -100,6 +100,7 @@ input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid 
 .x{border:0;background:none;color:var(--muted);font:600 12px var(--body);cursor:pointer;padding:6px}
 .x.armed{color:var(--bad)}
 .acct{display:grid;grid-template-columns:1fr 120px auto;gap:8px;align-items:center;padding:6px 0;border-top:1px solid var(--line)}
+.acctl .hh,.acctl .hr{grid-template-columns:1.5fr 1fr 1fr 1fr}
 .acct:first-of-type{border-top:0}.acct input{padding:7px 8px;font-size:15px;text-align:right}.acct>b{text-align:right}
 .kv.tot{border-top:1px solid var(--line);margin-top:4px;padding-top:8px}
 .bucket{border-top:1px solid var(--line)}.bucket:first-child{border-top:0}
@@ -1774,6 +1775,31 @@ function applyNames(){const n=S.settings?.names||{};NAMES.household=n.household|
   POOLS=[...BASE];for(const c of customs()){POOLS.push(c.id);NAMES[c.id]=c.name;NOTES[c.id]=c.shared?`Shared with ${NAMES.grace}`:"Only you see this"}}
 /* ---------- Friday reload ---------- */
 /* ---------- History: every period, card by card, with the math shown ---------- */
+/* What came out of / went into each bank account during one period: purchases, refill top-ups, moves, bills paid and money added. */
+function acctLedger(c,i){
+  const P=S.plan;if(!P)return [];const L=c.L,w=L[i],fs=forcedStarts(),end=i+1<L.length?L[i+1]:stepFrom(w,fs),inW=d=>{const n=dn(d);return n>=w&&n<end};
+  const E=[],add=(acct,amt,label,sub,ts)=>{if(acct&&Math.abs(amt)>0.004)E.push({acct,amt:Math.round(amt*100)/100,label,sub,ts:ts||0})};
+  for(const t of S.txns)if(inW(t.date)){const a=t.from==="cushion"&&!String(t.pool).startsWith("event:")?splurgeAcct():linkOf(t.pool);add(a,-t.amount,t.note||t.cat||"Purchase",`${poolName(t.pool)}${t.from==="cushion"?" splurge":""}`,t.ts)}
+  for(const m of S.moves)if(inW(m.date)){
+    if(m.from==="in"){add(epAcct(m.to),m.amount,m.reason||"Money added",`Onto ${epLabel(m.to)}`,m.ts);continue}
+    const a=epAcct(m.from),b=epAcct(m.to);if(!a||!b||a===b)continue;
+    add(a,-m.amount,`Moved to ${acctName(b)}`,`${epLabel(m.from)} → ${epLabel(m.to)}`,m.ts);add(b,m.amount,`Moved from ${acctName(a)}`,`${epLabel(m.from)} → ${epLabel(m.to)}`,m.ts)}
+  const src=P.refillFrom||"";
+  if(src&&i>0){const prev=L[i-1],ts=dayMs(w);
+    for(const p of POOLS){const a=linkOf(p);if(!a||a===src)continue;const r=c.R[p];
+      const left=budgetFor(p,prev)+(r.adj[prev]||0)-(r.carry[prev]||0)-(r.spent[prev]||0),top=Math.max(0,budgetFor(p,w)-(r.carry[w]||0)-left);
+      add(src,-top,`Refill to ${acctName(a)}`,`${NAMES[p]}'s top-up`,ts);add(a,top,`Refill from ${acctName(src)}`,`${NAMES[p]}'s top-up`,ts)}}
+  for(const x of P.paidLog||[])if(!x.skipped&&x.date&&inW(x.date)){const nm=x.key.split("|")[0],b=(P.bills||[]).find(y=>y.name===nm);add(x.acct||(b?billAcct(b):""),-(+x.amount||0),nm,"Bill paid",Date.parse(x.date+"T12:00:00"))}
+  for(const x of P.income||[])if(x.applied&&inW(x.date)){const src2=(incomeSources().find(s=>s[0]===x.src)||[,"Income"])[1];for(const [k,v] of Object.entries(x.applied))add(k,+v,src2,x.note||"Deposit",Date.parse(x.date+"T12:00:00"))}
+  return E}
+function acctLedgerHtml(E){if(!E.length)return "";
+  const accts=[...new Set(E.map(e=>e.acct))].sort((a,b)=>a==="usaa"?-1:b==="usaa"?1:a.localeCompare(b));
+  return `<div class="label" style="margin-top:10px">By bank account</div>
+    <div class="htable acctl"><div class="hh"><span>Account</span><span>Out</span><span>In</span><span>Net</span></div>
+    ${accts.map(a=>{const es=E.filter(e=>e.acct===a),o=es.filter(e=>e.amt<0).reduce((s,e)=>s-e.amt,0),n=es.filter(e=>e.amt>0).reduce((s,e)=>s+e.amt,0);
+      return `<div class="hr"><span><b>${esc(acctName(a))}</b></span><span class="num" style="color:var(--bad)">${o?"−"+m2(o).replace("−",""):"—"}</span><span class="num" style="color:var(--good)">${n?"+"+m2(n):"—"}</span><span class="num" style="font-weight:700">${m2(n-o)}</span></div>`}).join("")}</div>
+    ${accts.map(a=>{const es=E.filter(e=>e.acct===a).sort((x,y)=>y.ts-x.ts);
+      return `<details style="margin-top:6px"><summary class="small"><b>${esc(acctName(a))}</b> · ${es.length} item${es.length>1?"s":""}</summary><div class="list">${es.map(e=>`<div class="item"><div class="grow"><div>${esc(e.label)}</div><div class="small muted">${esc(e.sub)}</div></div><b class="num" style="color:${e.amt<0?"inherit":"var(--good)"}">${e.amt<0?"−"+m2(-e.amt):"+"+m2(e.amt)}</b></div>`).join("")}</div></details>`}).join("")}`}
 function historyTab(back){
   const c=compute(),L=c.L,fs=forcedStarts(),out=[];
   const tm=t=>new Date(t.ts||Date.parse(t.date+"T12:00:00")).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"});
@@ -1790,9 +1816,10 @@ function historyTab(back){
       ${cur?"":`<div class="small muted" style="margin-top:6px">${rows.filter(r=>Math.abs(r.left)>0.004).map(endTxt).join("<br>")||"Everything came out even."}</div>`}
       ${rows.some(r=>r.cin>0.004)?`<div class="small" style="margin-top:6px;color:var(--bad)">${rows.filter(r=>r.cin>0.004).map(r=>`${esc(NAMES[r.p])}: −${m2(r.cin)} from last ${PER().noun}'s overspending (splurge couldn't cover it)`).join("<br>")}</div>`:""}
       ${mv.length?`<div class="label" style="margin-top:10px">Money moved</div><div class="list">${mv.map(m=>{const nx=String(m.from).startsWith("next:");const here=wk(m.date)===w;
-        return `<div class="item"><div class="grow"><div>${nx&&!here?`Borrowed by last ${PER().noun}: ${esc(NAMES[m.from.slice(5)])}`:`${esc(epLabel(m.from))} → ${esc(epLabel(m.to))}`}</div><div class="small muted">${esc(m.reason||"")}${m.reason?" · ":""}${esc(tm(m))}</div></div><b class="num" style="color:${nx&&!here?"var(--bad)":"inherit"}">${nx&&!here?"−":""}${m2(m.amount)}</b></div>`}).join("")}</div>`:""}
+        return `<div class="item"><div class="grow"><div>${nx&&!here?`Borrowed by last ${PER().noun}: ${esc(NAMES[m.from.slice(5)])}`:`${esc(epLabel(m.from))} → ${esc(epLabel(m.to))}`}</div><div class="small muted">${(()=>{if(!S.plan?.cardAcct)return "";if(m.from==="in"){const b=epAcct(m.to);return b?"Into "+esc(acctName(b))+" · ":""}const a=epAcct(m.from),b=epAcct(m.to);return a&&b&&a!==b?esc(acctName(a))+" → "+esc(acctName(b))+" · ":a&&b?"Stays in "+esc(acctName(a))+" · ":""})()}${esc(m.reason||"")}${m.reason?" · ":""}${esc(tm(m))}</div></div><b class="num" style="color:${nx&&!here?"var(--bad)":"inherit"}">${nx&&!here?"−":""}${m2(m.amount)}</b></div>`}).join("")}</div>`:""}
+      ${S.plan?.cardAcct?acctLedgerHtml(acctLedger(c,i)):""}
       <div class="label" style="margin-top:10px">Purchases (${tx.length})</div>
-      ${tx.length?`<div class="list">${tx.map(t=>`<div class="item"><div class="grow"><div>${esc(t.note||t.cat||(t.mine?"Purchase":"Purchase"))}</div><div class="small muted">${esc(poolName(t.pool))}${t.from==="cushion"?" · from splurge":""} · ${esc(tm(t))}</div></div><b class="num">${m2(t.amount)}</b></div>`).join("")}</div>`:`<div class="small muted">None.</div>`}
+      ${tx.length?`<div class="list">${tx.map(t=>`<div class="item"><div class="grow"><div>${esc(t.note||t.cat||(t.mine?"Purchase":"Purchase"))}</div><div class="small muted">${esc(poolName(t.pool))}${t.from==="cushion"?" · from splurge":""}${(()=>{const a=S.plan?.cardAcct?(t.from==="cushion"&&!String(t.pool).startsWith("event:")?splurgeAcct():linkOf(t.pool)):"";return a?" · "+esc(acctName(a)):""})()} · ${esc(tm(t))}</div></div><b class="num">${m2(t.amount)}</b></div>`).join("")}</div>`:`<div class="small muted">None.</div>`}
     </details>`)}
   return `<section>${back?`<div style="display:flex;justify-content:flex-end"><button class="btn ghost sm" data-act="shist" data-v="0">Back</button></div>`:""}
     <div class="small muted">Every ${PER().noun}, card by card. "Moved" includes money borrowed from the next ${PER().noun}, moved between cards, or taken off for last ${PER().noun}'s overspending. Left = budget + moved − spent. When a card ends over, splurge covers it first (its own, then the other cards'), and only what splurge can't cover comes off the next ${PER().noun}.</div>
@@ -1958,7 +1985,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202610080745";
+const BUILD="202610081545";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
