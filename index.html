@@ -197,7 +197,13 @@ const HCATS=["Groceries","Eating out","Pets"];
 const DAY=864e5;
 const S={ready:false,owner:false,view:"grace",tab:"week",settings:null,settingsLoaded:false,txns:[],moves:[],events:[],plan:null,gPool:"grace",planMissing:false};
 let db=null;
-try{S.tab=localStorage.getItem("mfb-tab")||"week"}catch(e){}
+/* Opening the app: the full app always starts on Home (or Bills from a bill notification); Simple view stays Simple view. */
+S.tab=/^#bills/.test(location.hash)?"bills":"week";
+try{if(localStorage.getItem("fb-simple")==="1")S.prefs={simple:true}}catch(_){}
+function rememberView(){try{localStorage.setItem("fb-simple",S.prefs?.simple?"1":"0")}catch(_){}}
+let hiddenAt=0;
+document.addEventListener("visibilitychange",()=>{if(document.hidden){hiddenAt=Date.now();return}
+  if(hiddenAt&&Date.now()-hiddenAt>5*60e3){S.tab="week";S.showHist=false;S.gTab=null;S.payOpen=S.varOpen=null;window.scrollTo(0,0);if(S.ready)render()}hiddenAt=0});
 
 const pad=n=>String(n).padStart(2,"0");
 const todayS=()=>{const t=new Date();return `${t.getFullYear()}-${pad(t.getMonth()+1)}-${pad(t.getDate())}`};
@@ -1466,7 +1472,7 @@ document.addEventListener("click",async e=>{
   if(a==="depadd"){const r=depRuleSet(S.depSrc||"mine");r.splits=[...(r.splits||[]),{to:acctList().find(x=>x.k!==r.home)?.k||"usaa",amt:0}];render();savePlan();return}
   if(a==="depdel"){const r=depRuleSet(S.depSrc||"mine");r.splits.splice(+b.dataset.i,1);render();savePlan();return}
   if(a==="shist"){S.showHist=b.dataset.v==="1";window.scrollTo(0,0);render();return}
-  if(a==="simpleview"){S.prefs=S.prefs||{};S.prefs.simple=b.dataset.v==="1";S.gTab=null;window.scrollTo(0,0);render();savePrefs();return}
+  if(a==="simpleview"){S.prefs=S.prefs||{};S.prefs.simple=b.dataset.v==="1";rememberView();S.gTab=null;window.scrollTo(0,0);render();savePrefs();return}
   if(a==="gtab"){S.gTab=b.dataset.k;render();return}
   if(a==="pshow"){const k=b.dataset.k,on=b.dataset.v==="1";
     try{if(k.startsWith("custom:")){const id=k.slice(7);await saveSettings({custom:(S.settings.custom||[]).map(c=>c.id===id?{...c,shared:on}:c)})}
@@ -1477,7 +1483,7 @@ document.addEventListener("click",async e=>{
   if(a==="gshide"){if(!arm(b,"Tap again to hide"))return;try{await saveSettings({onboardDone:true})}catch(err){fail(err)}return}
   if(a==="scadd"){payCalc().rows.push({base:80,ot:0});render();savePlan();return}
   if(a==="scdel"){const pc=payCalc();pc.rows.splice(+b.dataset.i,1);render();savePlan();return}
-  if(a==="tab"){S.tab=b.dataset.t;try{localStorage.setItem("mfb-tab",S.tab)}catch(_){}render();return}
+  if(a==="tab"){S.tab=b.dataset.t;render();return}
   if(a==="view"){S.view=b.dataset.v;render();window.scrollTo(0,0);return}
   if(a==="pool"){e.preventDefault();if(S.view==="grace")S.gPool=b.dataset.p;else S.aPool=b.dataset.p;render();document.getElementById("lf-amt")?.focus();return}
   if(a==="newweek"){if(!arm(b,`Tap again to start a new ${PER().noun}`))return;
@@ -1952,7 +1958,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202610071026";
+const BUILD="202610080745";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
@@ -2072,7 +2078,7 @@ async function start(){
   S.owner=hh?.created_by===ME;
   try{await LOAD.settings();await Promise.all(Object.entries(LOAD).filter(([k])=>k!=="settings").map(([,f])=>f()))}catch(err){fail(err)}
   S.full=S.owner||!!S.settings?.partnerFull;S.view=S.full?"aspen":"grace";S.aPool=S.owner?"aspen":"grace";
-  try{const pr=await sb.from("wb_prefs").select("data").eq("user_id",ME).maybeSingle();S.prefs=pr.data?.data||{}}catch(_){S.prefs={}}
+  try{const pr=await sb.from("wb_prefs").select("data").eq("user_id",ME).maybeSingle();S.prefs=pr.data?.data||{};rememberView()}catch(_){S.prefs=S.prefs||{}}
   S.ready=true;render();runAutopay();syncTZ();
   if(channel)sb.removeChannel(channel);
   channel=sb.channel("wb-"+HID);
