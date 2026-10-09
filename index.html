@@ -313,6 +313,7 @@ function simpleView(me,self){
   return `
   ${self?`<div style="display:flex;justify-content:flex-end;margin-bottom:6px"><button class="btn ghost sm" data-act="simpleview" data-v="0">Full app</button></div>`:S.owner?`<header><div><div class="label">Preview</div><h1 class="brand"><img src="icon.svg" alt="" class="logo">${esc(NAMES.grace)}'s screen</h1></div><button class="btn ghost sm" data-act="view" data-v="aspen">Back to my view</button></header>`:""}
   <div style="margin-bottom:10px">${statusPair(c,me)}</div>
+  ${self&&S.owner?`${refillDueCard(c)}<div class="kv" style="margin:0 2px 10px"><span class="small"><b>Total splurge</b> <span class="muted">all cards</span></span><b class="num">${m2(POOLS.reduce((s,p)=>s+c[p].cushion,0))}</b></div>`:""}
   <nav class="seg gtabs" role="tablist" style="margin-top:4px">${tabs.map(([k,l])=>`<button type="button" role="tab" data-act="gtab" data-k="${esc(k)}" aria-pressed="${k===tab}">${esc(l)}</button>`).join("")}</nav>
   <div class="card hero ${left<0?"over":""}">
     <div class="label">${esc(who)} money left</div>
@@ -585,6 +586,20 @@ function dueTodayCard(){
   </div>`;
 }
 
+/* Refill day: what has to be sent from the refill account to cards that spend from a different account (Grace Checking). */
+function refillDue(c){
+  const L=c.L,i=L.length-1;if(i<1||dn(todayS())!==c.cw)return [];
+  const P=S.plan||{},src=P.refillFrom||"",prev=L[i-1],out=[];
+  for(const p of POOLS){const a=linkOf(p);if(src?(!a||a===src):p!=="grace")continue;const r=c.R[p];
+    const left=budgetFor(p,prev)+(r.adj[prev]||0)-(r.carry[prev]||0)-(r.spent[prev]||0),top=Math.round(Math.max(0,budgetFor(p,c.cw)-(r.carry[c.cw]||0)-left)*100)/100;
+    if(top>0.004)out.push({p,top,left,from:src,to:a})}
+  return out}
+function refillDueCard(c){const due=refillDue(c);if(!due.length)return "";
+  let done=false;try{done=localStorage.getItem("fb-sent")===todayS()}catch(_){}
+  return `<div class="card" style="border-color:var(--good);${done?"opacity:.6":""}"><h2>${done?"✓ Sent":"Refill day: send today"}</h2>
+    <div class="list">${due.map(x=>`<div class="item"><div class="grow"><div><b>${esc(NAMES[x.p])}</b>${x.from&&x.to?` <span class="small muted">${esc(acctName(x.from))} → ${esc(acctName(x.to))}</span>`:""}</div>
+      <div class="small muted">${m2(x.left)} was left from last ${esc(PER().noun)}, so only the difference goes over</div></div><b class="num" style="font-size:20px">${m2(x.top)}</b></div>`).join("")}</div>
+    ${done?`<button class="x" data-act="sent" data-v="0">Not sent yet</button>`:`<button class="btn sm" data-act="sent" data-v="1" style="margin-top:6px">I sent it</button>`}</div>`}
 function weekTab(){
   const c=compute();
   const list=S.txns.filter(t=>wk(t.date)===c.cw).sort((a,b)=>b.ts-a.ts);
@@ -593,6 +608,7 @@ function weekTab(){
   return `<section>
     ${hideSec("bills")?"":dueTodayCard()}
     ${gettingStarted()}
+    ${S.owner?refillDueCard(c):""}
     ${hideSec("status")?"":statusPair(c,S.owner?"aspen":"grace")}
     ${rescueBanner(c)}
     ${hideSec("cards")?"":`<div class="pools">${POOLS.filter(p=>!hideCard(p)).map(p=>{const x=c[p],st=poolStatus(x,f);return `<div class="card pool st-${st} ${x.left<0?"over":""}">
@@ -601,6 +617,7 @@ function weekTab(){
       <div class="bar"><i style="width:${pct(x.spent,x.alloc)}%"></i></div>
       <div class="muted small">${m0(x.spent)} of ${m0(x.alloc)}${x.alloc!==x.budget?` <span title="Includes money moved">(budget ${m0(x.budget)})</span>`:""}</div>
       <span class="chip ${x.cushion<0?"bad":""}">Splurge ${m2(x.cushion)}</span></div>`}).join("")}</div>
+    <div class="kv tot" style="margin:2px 2px 6px"><span><b>Total splurge</b> <span class="small muted">all cards together</span></span><b class="num">${m2(POOLS.reduce((s,p)=>s+c[p].cushion,0))}</b></div>
     <div class="muted small">Splurge is what was left over before. Unspent money rolls in when the ${PER().noun} resets; overspending comes out of it.</div>`}
     ${hideSec("log")?"":logForm(pool,false)}
     ${S.full||S.owner?(hideSec("addmoney")?"":addMoneyCard(c)):""}
@@ -1485,6 +1502,7 @@ document.addEventListener("click",async e=>{
   if(a==="scadd"){payCalc().rows.push({base:80,ot:0});render();savePlan();return}
   if(a==="scdel"){const pc=payCalc();pc.rows.splice(+b.dataset.i,1);render();savePlan();return}
   if(a==="tab"){S.tab=b.dataset.t;render();return}
+  if(a==="sent"){try{localStorage.setItem("fb-sent",b.dataset.v==="1"?todayS():"")}catch(_){}render();return}
   if(a==="view"){S.view=b.dataset.v;render();window.scrollTo(0,0);return}
   if(a==="pool"){e.preventDefault();if(S.view==="grace")S.gPool=b.dataset.p;else S.aPool=b.dataset.p;render();document.getElementById("lf-amt")?.focus();return}
   if(a==="newweek"){if(!arm(b,`Tap again to start a new ${PER().noun}`))return;
@@ -1985,7 +2003,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202610081545";
+const BUILD="202610090656";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
