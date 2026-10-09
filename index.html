@@ -244,7 +244,7 @@ function compute(){
   const cw=wk(todayS()),R={};
   POOLS.forEach(p=>R[p]={adj:{},spent:{},cush:0});
   for(const t of S.txns){const r=R[t.pool];if(!r)continue;
-    if(t.from==="cushion")r.cush-=t.amount;else{const w=wk(t.date);r.spent[w]=(r.spent[w]||0)+t.amount}}
+    if(t.from==="cushion")(R[t.cushPool]||r).cush-=t.amount;else{const w=wk(t.date);r.spent[w]=(r.spent[w]||0)+t.amount}}
   const fs=forcedStarts();
   const ap=(ep,amt,w)=>{const [k,p]=String(ep).split(":");if(!R[p])return;
     if(k==="week")R[p].adj[w]=(R[p].adj[w]||0)+amt;else if(k==="cushion")R[p].cush+=amt;
@@ -272,7 +272,7 @@ function compute(){
 function settle(lefts,cush){const cover={},carry={},r2=x=>Math.round(x*100)/100;
   for(const p of POOLS)if(lefts[p]>0)cush[p]+=lefts[p];
   for(const p of POOLS){let d=-lefts[p];if(!(d>0.004))continue;cover[p]=[];
-    const order=[p,...POOLS.filter(q=>q!==p).sort((a,b)=>cush[b]-cush[a])];
+    const sa=splurgeAcctOf(p),order=[p,...POOLS.filter(q=>q!==p).sort((a,b)=>((splurgeAcctOf(b)===sa)-(splurgeAcctOf(a)===sa))||cush[b]-cush[a])];
     for(const q of order){if(d<=0.004)break;const t=Math.min(d,Math.max(0,cush[q]));
       if(t>0.004){cush[q]-=t;d-=t;cover[p].push({q,amt:r2(t)})}}
     if(d>0.004)carry[p]=r2(d)}
@@ -313,7 +313,7 @@ function simpleView(me,self){
   return `
   ${self?`<div style="display:flex;justify-content:flex-end;margin-bottom:6px"><button class="btn ghost sm" data-act="simpleview" data-v="0">Full app</button></div>`:S.owner?`<header><div><div class="label">Preview</div><h1 class="brand"><img src="icon.svg" alt="" class="logo">${esc(NAMES.grace)}'s screen</h1></div><button class="btn ghost sm" data-act="view" data-v="aspen">Back to my view</button></header>`:""}
   <div style="margin-bottom:10px">${statusPair(c,me)}</div>
-  ${self&&S.owner?`${refillDueCard(c)}<div class="kv" style="margin:0 2px 10px"><span class="small"><b>Total splurge</b> <span class="muted">all cards</span></span><b class="num">${m2(POOLS.reduce((s,p)=>s+c[p].cushion,0))}</b></div>`:""}
+  ${self&&S.owner?`${refillDueCard(c)}${splurgeCard(c)}`:""}
   <nav class="seg gtabs" role="tablist" style="margin-top:4px">${tabs.map(([k,l])=>`<button type="button" role="tab" data-act="gtab" data-k="${esc(k)}" aria-pressed="${k===tab}">${esc(l)}</button>`).join("")}</nav>
   <div class="card hero ${left<0?"over":""}">
     <div class="label">${esc(who)} money left</div>
@@ -403,7 +403,8 @@ function logForm(pool,grace){
       <label class="f">What was it?<input id="lf-note" placeholder="${pool==="household"?"Kroger":"Gas"}" autocomplete="off"></label>
     </div>
     ${pool==="household"?`<label class="f">Category<select id="lf-cat">${HCATS.map(x=>`<option>${x}</option>`).join("")}</select></label>`:""}
-    ${!grace&&pool!=="household"&&!isEv?`<label class="check"><input type="checkbox" id="lf-cush"> Pay from cushion (a splurge)</label>`:""}
+    ${!grace&&!isEv?(()=>{const c=compute(),pots=splurgePots(c);return `<label class="f">Paid from<select id="lf-from"><option value="week">${esc(poolName(pool))} ${esc(PER().this)} (${m2(c[pool].left)} left)</option>
+      ${pots.map(x=>`<option value="pot:${esc(x.acct)}">Splurge in ${esc(x.acct==="all"?"savings":acctName(x.acct))} (${m2(x.total)})</option>`).join("")}</select></label>`})():""}
     ${grace?"":`<label class="f">Date<input type="date" id="lf-date" value="${todayS()}"></label>`}
     <div class="receipt-row">
       <label class="btn sm" for="lf-cam">Snap receipt</label>
@@ -600,6 +601,21 @@ function refillDueCard(c){const due=refillDue(c);if(!due.length)return "";
     <div class="list">${due.map(x=>`<div class="item"><div class="grow"><div><b>${esc(NAMES[x.p])}</b>${x.from&&x.to?` <span class="small muted">${esc(acctName(x.from))} → ${esc(acctName(x.to))}</span>`:""}</div>
       <div class="small muted">${m2(x.left)} was left from last ${esc(PER().noun)}, so only the difference goes over</div></div><b class="num" style="font-size:20px">${m2(x.top)}</b></div>`).join("")}</div>
     ${done?`<button class="x" data-act="sent" data-v="0">Not sent yet</button>`:`<button class="btn sm" data-act="sent" data-v="1" style="margin-top:6px">I sent it</button>`}</div>`}
+/* How the splurge total built up, week by week: leftovers in, overspending covered, splurge spent or moved. */
+function splurgeHistory(c){const L=c.L,rows=[];let run=0;
+  for(let i=0;i<L.length;i++){const w=L[i],cur=w===c.cw,end=i+1<L.length?L[i+1]:Infinity,inW=d=>{const n=dn(d);return n>=w&&n<end};
+    let add=0,cov=0;if(!cur)for(const p of POOLS){const r=c.R[p],left=budgetFor(p,w)+(r.adj[w]||0)-(r.carry[w]||0)-(r.spent[w]||0);if(left>0)add+=left;cov+=(r.cover[w]||[]).reduce((s,x)=>s+x.amt,0)}
+    const spent=S.txns.filter(t=>t.from==="cushion"&&inW(t.date)).reduce((s,t)=>s+t.amount,0);
+    let mv=0;for(const m of S.moves)if(inW(m.date)){if(String(m.from).startsWith("cushion:"))mv-=m.amount;if(String(m.to).startsWith("cushion:"))mv+=m.amount}
+    const net=add-cov-spent+mv;run+=net;if(Math.abs(add)+Math.abs(cov)+Math.abs(spent)+Math.abs(mv)>0.004)rows.push({w,cur,add,cov,spent,mv,net,run})}
+  return rows}
+function splurgeCard(c){const pots=splurgePots(c),tot=pots.reduce((s,x)=>s+x.total,0),hist=splurgeHistory(c);
+  return `<div class="card"><div class="kv tot" style="margin:0"><span><b>Total splurge</b> <span class="small muted">built up from past ${esc(PER().noun)}s</span></span><b class="num">${m2(tot)}</b></div>
+    ${pots.length>1||pots[0]?.acct!=="all"?pots.map(x=>`<div class="kv"><span>In ${esc(x.acct==="all"?"savings":acctName(x.acct))} <span class="small muted">${x.pools.map(p=>esc(NAMES[p])).join(", ")}</span></span><b class="num">${m2(x.total)}</b></div>`).join(""):""}
+    ${hist.length?`<details style="margin-top:6px"><summary class="small"><b>How it added up</b></summary><div class="list">${hist.map(r=>`<div class="item"><div class="grow"><div>${r.cur?"This "+esc(PER().noun):"Week of "+esc(short(r.w))}</div>
+      <div class="small muted">${[r.add>0.004?`+${m2(r.add)} left over`:"",r.cov>0.004?`−${m2(r.cov)} covered overspending`:"",r.spent>0.004?`−${m2(r.spent)} spent from splurge`:"",Math.abs(r.mv)>0.004?`${r.mv>0?"+":"−"}${m2(Math.abs(r.mv))} moved`:""].filter(Boolean).join(" · ")}</div></div>
+      <div style="text-align:right"><b class="num">${m2(r.run)}</b><div class="small muted">${r.net>=0?"+":"−"}${m2(Math.abs(r.net))}</div></div></div>`).join("")}</div></details>`:""}
+  </div>`}
 function weekTab(){
   const c=compute();
   const list=S.txns.filter(t=>wk(t.date)===c.cw).sort((a,b)=>b.ts-a.ts);
@@ -617,7 +633,7 @@ function weekTab(){
       <div class="bar"><i style="width:${pct(x.spent,x.alloc)}%"></i></div>
       <div class="muted small">${m0(x.spent)} of ${m0(x.alloc)}${x.alloc!==x.budget?` <span title="Includes money moved">(budget ${m0(x.budget)})</span>`:""}</div>
       <span class="chip ${x.cushion<0?"bad":""}">Splurge ${m2(x.cushion)}</span></div>`}).join("")}</div>
-    <div class="kv tot" style="margin:2px 2px 6px"><span><b>Total splurge</b> <span class="small muted">all cards together</span></span><b class="num">${m2(POOLS.reduce((s,p)=>s+c[p].cushion,0))}</b></div>
+    ${splurgeCard(c)}
     <div class="muted small">Splurge is what was left over before. Unspent money rolls in when the ${PER().noun} resets; overspending comes out of it.</div>`}
     ${hideSec("log")?"":logForm(pool,false)}
     ${S.full||S.owner?(hideSec("addmoney")?"":addMoneyCard(c)):""}
@@ -895,13 +911,18 @@ function acctAdjust(which,delta){const P=S.plan;const r=v=>Math.round(v*100)/100
    logged on a partner's phone. Only counts what happened after a balance was last typed in. */
 function linkOf(pool){const m=S.plan?.cardAcct||{};return String(pool).startsWith("event:")?(m.events||""):(m[pool]||"")}
 function splurgeAcct(){const P=S.plan||{};return P.splurgeAcct||P.refillFrom||""}
+/* A card's leftovers stay in the account it spends from, so its splurge lives there too. */
+function splurgeAcctOf(p){return linkOf(p)||splurgeAcct()}
+function txAcct(t){return t.from==="cushion"&&!String(t.pool).startsWith("event:")?splurgeAcctOf(t.cushPool||t.pool):linkOf(t.pool)}
+function splurgePots(c){const m={};for(const p of POOLS){const a=splurgeAcctOf(p)||"all";(m[a]=m[a]||{acct:a,pools:[],total:0}).pools.push(p);m[a].total+=c[p].cushion}
+  return Object.values(m).map(x=>({...x,total:Math.round(x.total*100)/100})).sort((a,b)=>a.acct==="usaa"?-1:b.acct==="usaa"?1:0)}
 function epAcct(ep){ep=String(ep);if(ep==="in")return "";const [k,p]=ep.split(":");
-  if(k==="week"||k==="next")return linkOf(p);if(k==="cushion")return splurgeAcct();if(k==="event")return linkOf(ep);
+  if(k==="week"||k==="next")return linkOf(p);if(k==="cushion")return splurgeAcctOf(p);if(k==="event")return linkOf(ep);
   if(k==="goal"||ep==="usaa")return (S.plan?.cardAcct&&Object.keys(S.plan.cardAcct).length)||S.plan?.refillFrom?"usaa":"";return ""}
 function dayMs(w){return new Date(ds(w)+"T00:00:00").getTime()}
 function acctDelta(k){
   const P=S.plan;if(!P?.cardAcct)return 0;const since=(P.acctAsOf||{})[k];if(!since)return 0;let d=0;
-  for(const t of S.txns)if((t.ts||0)>since&&(t.from==="cushion"&&!String(t.pool).startsWith("event:")?splurgeAcct():linkOf(t.pool))===k)d-=t.amount;
+  for(const t of S.txns)if((t.ts||0)>since&&txAcct(t)===k)d-=t.amount;
   for(const m of S.moves){if((m.ts||0)<=since)continue;if(m.from==="in"){if(epAcct(m.to)===k)d+=m.amount;continue}const a=epAcct(m.from),b=epAcct(m.to);if(!a||!b||a===b)continue;if(a===k)d-=m.amount;if(b===k)d+=m.amount}
   const src=P.refillFrom||"";
   if(src){const c=compute(),L=c.L;
@@ -922,8 +943,8 @@ function cardLinkCard(){
       <label class="linkrow"><span>Special budgets</span>${sel("events",m.events||"")}</label></div>
     <label class="f" style="margin-top:10px">Refill top-ups come from${`<select data-link="__src"><option value="">Nowhere (don't move money)</option>${accts.map(a=>`<option value="${esc(a.k)}" ${a.k===(P.refillFrom||"")?"selected":""}>${esc(a.name)}</option>`).join("")}</select>`}</label>
     <div class="small muted">Cards linked to this same account don't need a transfer. Their purchases already come out of it.</div>
-    <label class="f" style="margin-top:10px">Splurge money is kept in<select data-link="__spl"><option value="">Same as refills${P.refillFrom?` (${esc(acctName(P.refillFrom))})`:""}</option>${accts.map(a=>`<option value="${esc(a.k)}" ${a.k===(P.splurgeAcct||"")?"selected":""}>${esc(a.name)}</option>`).join("")}</select></label>
-    <div class="small muted">When only the difference moves over on refill day, whatever wasn't spent stays here as splurge money. Splurge purchases and money moved between accounts update these balances too.</div>
+    <label class="f" style="margin-top:10px">Splurge for cards that aren't linked is kept in<select data-link="__spl"><option value="">Same as refills${P.refillFrom?` (${esc(acctName(P.refillFrom))})`:""}</option>${accts.map(a=>`<option value="${esc(a.k)}" ${a.k===(P.splurgeAcct||"")?"selected":""}>${esc(a.name)}</option>`).join("")}</select></label>
+    <div class="small muted">Only the difference moves over on refill day, so whatever a card didn't spend stays in that card's account as its splurge: ${POOLS.filter(p=>linkOf(p)).map(p=>`${esc(NAMES[p])} in ${esc(acctName(linkOf(p)))}`).join(", ")||"none linked yet"}. When you pay from splurge, you pick which account it came out of.</div>
   </div>`;
 }
 function acctList(){const P=S.plan||{},lb=L();return [{k:"usaa",name:lb.save},{k:"chase",name:lb.bills},...(P.otherAccts||[]).map(a=>{if(!a.id)a.id="a"+Math.random().toString(36).slice(2,8);return {k:"x:"+a.id,name:a.name}})]}
@@ -1646,7 +1667,10 @@ document.addEventListener("submit",async e=>{
     const amt=num(val("lf-amt"));if(!(amt>0)){toast("Enter the amount");return}
     const pool=document.querySelector('#logf [data-act="pool"][aria-pressed="true"]')?.dataset.p||"aspen";
     const doc={pool,amount:amt,note:val("lf-note").trim().slice(0,80),
-      cat:val("lf-cat"),from:document.getElementById("lf-cush")?.checked?"cushion":"week",
+      cat:val("lf-cat"),...(()=>{const v=document.getElementById("lf-from")?.value||"week";if(!v.startsWith("pot:"))return {from:"week"};
+        const c=compute(),pot=splurgePots(c).find(x=>"pot:"+x.acct===v),amt0=num(val("lf-amt"))||0;if(!pot)return {from:"week"};
+        const mine=pot.pools.includes(pool)&&c[pool].cushion>=amt0?pool:[...pot.pools].sort((a,b)=>c[b].cushion-c[a].cushion)[0];
+        return {from:"cushion",cushPool:mine}})(),
       date:val("lf-date")||todayS(),ts:Date.now(),by:S.owner?"owner":"partner"};
     if(logBusy)return;logBusy=true;
     const btn=f.querySelector('button[type="submit"]');if(btn){btn.disabled=true;btn.textContent="Saving…"}
@@ -1797,7 +1821,7 @@ function applyNames(){const n=S.settings?.names||{};NAMES.household=n.household|
 function acctLedger(c,i){
   const P=S.plan;if(!P)return [];const L=c.L,w=L[i],fs=forcedStarts(),end=i+1<L.length?L[i+1]:stepFrom(w,fs),inW=d=>{const n=dn(d);return n>=w&&n<end};
   const E=[],add=(acct,amt,label,sub,ts)=>{if(acct&&Math.abs(amt)>0.004)E.push({acct,amt:Math.round(amt*100)/100,label,sub,ts:ts||0})};
-  for(const t of S.txns)if(inW(t.date)){const a=t.from==="cushion"&&!String(t.pool).startsWith("event:")?splurgeAcct():linkOf(t.pool);add(a,-t.amount,t.note||t.cat||"Purchase",`${poolName(t.pool)}${t.from==="cushion"?" splurge":""}`,t.ts)}
+  for(const t of S.txns)if(inW(t.date)){const a=txAcct(t);add(a,-t.amount,t.note||t.cat||"Purchase",`${poolName(t.pool)}${t.from==="cushion"?" splurge":""}`,t.ts)}
   for(const m of S.moves)if(inW(m.date)){
     if(m.from==="in"){add(epAcct(m.to),m.amount,m.reason||"Money added",`Onto ${epLabel(m.to)}`,m.ts);continue}
     const a=epAcct(m.from),b=epAcct(m.to);if(!a||!b||a===b)continue;
@@ -1837,7 +1861,7 @@ function historyTab(back){
         return `<div class="item"><div class="grow"><div>${nx&&!here?`Borrowed by last ${PER().noun}: ${esc(NAMES[m.from.slice(5)])}`:`${esc(epLabel(m.from))} → ${esc(epLabel(m.to))}`}</div><div class="small muted">${(()=>{if(!S.plan?.cardAcct)return "";if(m.from==="in"){const b=epAcct(m.to);return b?"Into "+esc(acctName(b))+" · ":""}const a=epAcct(m.from),b=epAcct(m.to);return a&&b&&a!==b?esc(acctName(a))+" → "+esc(acctName(b))+" · ":a&&b?"Stays in "+esc(acctName(a))+" · ":""})()}${esc(m.reason||"")}${m.reason?" · ":""}${esc(tm(m))}</div></div><b class="num" style="color:${nx&&!here?"var(--bad)":"inherit"}">${nx&&!here?"−":""}${m2(m.amount)}</b></div>`}).join("")}</div>`:""}
       ${S.plan?.cardAcct?acctLedgerHtml(acctLedger(c,i)):""}
       <div class="label" style="margin-top:10px">Purchases (${tx.length})</div>
-      ${tx.length?`<div class="list">${tx.map(t=>`<div class="item"><div class="grow"><div>${esc(t.note||t.cat||(t.mine?"Purchase":"Purchase"))}</div><div class="small muted">${esc(poolName(t.pool))}${t.from==="cushion"?" · from splurge":""}${(()=>{const a=S.plan?.cardAcct?(t.from==="cushion"&&!String(t.pool).startsWith("event:")?splurgeAcct():linkOf(t.pool)):"";return a?" · "+esc(acctName(a)):""})()} · ${esc(tm(t))}</div></div><b class="num">${m2(t.amount)}</b></div>`).join("")}</div>`:`<div class="small muted">None.</div>`}
+      ${tx.length?`<div class="list">${tx.map(t=>`<div class="item"><div class="grow"><div>${esc(t.note||t.cat||(t.mine?"Purchase":"Purchase"))}</div><div class="small muted">${esc(poolName(t.pool))}${t.from==="cushion"?" · from splurge":""}${(()=>{const a=S.plan?.cardAcct?txAcct(t):"";return a?" · "+esc(acctName(a)):""})()} · ${esc(tm(t))}</div></div><b class="num">${m2(t.amount)}</b></div>`).join("")}</div>`:`<div class="small muted">None.</div>`}
     </details>`)}
   return `<section>${back?`<div style="display:flex;justify-content:flex-end"><button class="btn ghost sm" data-act="shist" data-v="0">Back</button></div>`:""}
     <div class="small muted">Every ${PER().noun}, card by card. "Moved" includes money borrowed from the next ${PER().noun}, moved between cards, or taken off for last ${PER().noun}'s overspending. Left = budget + moved − spent. When a card ends over, splurge covers it first (its own, then the other cards'), and only what splurge can't cover comes off the next ${PER().noun}.</div>
@@ -1935,7 +1959,7 @@ const VAPID="BHF-8MfnRIpMduuGXC0PScG1sci3JbouOLAsmCK3V1PwDGyjdm9UVm7wqTsG8QhzrHo
 const sb=window.supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
 let HID=null,ME=null,channel=null;
 const chk=r=>{if(r.error)throw r.error;return r.data};
-const mapTx=r=>({id:r.id,pool:r.pool,amount:+r.amount,note:r.note||"",cat:r.cat||"",from:r.src,date:r.date,ts:Date.parse(r.created_at),mine:r.created_by===ME});
+const mapTx=r=>({id:r.id,cushPool:r.cush_pool||null,pool:r.pool,amount:+r.amount,note:r.note||"",cat:r.cat||"",from:r.src,date:r.date,ts:Date.parse(r.created_at),mine:r.created_by===ME});
 const mapMv=r=>({id:r.id,from:r.from_ep,to:r.to_ep,amount:+r.amount,reason:r.reason||"",date:r.date,ts:Date.parse(r.created_at)});
 const mapEv=r=>({id:r.id,name:r.name,budget:+r.budget,active:r.active,created:Date.parse(r.created_at)});
 const LOAD={
@@ -1957,7 +1981,7 @@ db={
       else if(c==="private"){chk(await sb.from("wb_plan").upsert({household_id:HID,data:body,updated_at:now}))}},
     async update(patch){chk(await sb.from(TBL[c]).update(patch).eq("id",id));await LOAD[c]();render()}}},
   collection(c){return{async add(d){
-    if(c==="txns"){const row=chk(await sb.from("wb_txns").insert({household_id:HID,pool:d.pool,amount:d.amount,src:d.from==="cushion"?"cushion":"week",date:d.date}).select("id").single());
+    if(c==="txns"){const row=chk(await sb.from("wb_txns").insert({household_id:HID,pool:d.pool,amount:d.amount,src:d.from==="cushion"?"cushion":"week",cush_pool:d.from==="cushion"&&d.cushPool?d.cushPool:null,date:d.date}).select("id").single());
       let receipt=null;
       if(d.receiptBlob){const path=`${ME}/${row.id}.jpg`;const up=await sb.storage.from("receipts").upload(path,d.receiptBlob,{contentType:"image/jpeg",upsert:true});if(up.error)toast("Saved, but the receipt photo didn't upload");else receipt=path}
       if(d.note||d.cat||receipt)chk(await sb.from("wb_txn_notes").insert({txn_id:row.id,household_id:HID,shared:!["aspen","grace"].includes(d.pool),note:d.note||null,cat:d.cat||null,receipt}))}
@@ -2003,7 +2027,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202610090656";
+const BUILD="202610090703";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);

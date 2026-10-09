@@ -72,7 +72,7 @@ function summarize(settings: any, txns: any[], moves: any[], events: any[], toda
   const R: Record<string, any> = {};
   for (const p of pools) R[p] = { adj: {}, spent: {}, cush: 0 };
   for (const x of txns) { const r = R[x.pool]; if (!r) continue; const amt = +x.amount;
-    if (x.src === "cushion") r.cush -= amt; else { const k = wk(x.date); r.spent[k] = (r.spent[k] || 0) + amt; } }
+    if (x.src === "cushion") (R[x.cush_pool] || r).cush -= amt; else { const k = wk(x.date); r.spent[k] = (r.spent[k] || 0) + amt; } }
   const ap = (ep: string, amt: number, k: number) => { const [kind, p] = ep.split(":"); if (!R[p]) return;
     if (kind === "week") R[p].adj[k] = (R[p].adj[k] || 0) + amt; else if (kind === "cushion") R[p].cush += amt;
     else if (kind === "next") { const nx = step(k); R[p].adj[nx] = (R[p].adj[nx] || 0) + amt; } };
@@ -205,7 +205,7 @@ async function alertCheck(subs: any[], force: boolean, only: string | null) {
       const [{ data: hh }, { data: st }, { data: tx }, { data: mv }] = await Promise.all([
         supabase.from("households").select("created_by").eq("id", hid).maybeSingle(),
         supabase.from("wb_settings").select("data").eq("household_id", hid).maybeSingle(),
-        supabase.from("wb_txns").select("pool,amount,src,date").eq("household_id", hid),
+        supabase.from("wb_txns").select("pool,amount,src,date,cush_pool").eq("household_id", hid),
         supabase.from("wb_moves").select("from_ep,to_ep,amount,date").eq("household_id", hid),
       ]);
       cache[ck] = st?.data ? { owner: hh?.created_by, s: summarize(st.data, tx ?? [], mv ?? [], [], now.date) } : null;
@@ -292,7 +292,7 @@ Deno.serve(async (req) => {
       const [{ data: hh }, { data: st }, { data: tx }, { data: mv }, { data: ev }] = await Promise.all([
         supabase.from("households").select("created_by").eq("id", hid).maybeSingle(),
         supabase.from("wb_settings").select("data").eq("household_id", hid).maybeSingle(),
-        supabase.from("wb_txns").select("pool,amount,src,date").eq("household_id", hid),
+        supabase.from("wb_txns").select("pool,amount,src,date,cush_pool").eq("household_id", hid),
         supabase.from("wb_moves").select("from_ep,to_ep,amount,date").eq("household_id", hid),
         supabase.from("wb_events").select("id,name,budget,active").eq("household_id", hid),
       ]);
