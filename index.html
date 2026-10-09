@@ -851,7 +851,7 @@ function incomePreviewHtml(){
     ${s.rule.cover?`<div><span>${esc(lb.bills)} bills due by ${short(s.end)}</span><b>${m2(s.due.sum)}</b></div>
     <div><span class="muted">${esc(lb.bills)} has now</span><b class="muted">${m2(s.chase)}</b></div>`:""}
     ${s.auto.map(x=>`<div><span>Automatic: ${esc(acctName(x.to))}</span><b>${m2(x.amt)}</b></div>`).join("")}
-    ${s.spend?`<div><span>Spending refill</span><b>${m2(s.spend)}</b></div>`:""}
+    ${s.spend?`<div><span class="muted">Spending money for the next 2 weeks (stays in ${esc(acctName(S.plan.refillFrom||s.rule.home))})</span><b class="muted">${m2(s.spend)}</b></div>`:""}
     ${Object.entries(s.out).filter(([,v])=>v>0).map(([k,v])=>`<div class="strong"><span>Ends up in ${esc(acctName(k))}</span><b style="color:var(--good)">${m2(v)}</b></div>`).join("")}
   </div>
   ${s.move>0?`<div class="small muted">Includes ${m2(s.move)} moved to ${esc(lb.bills)} so it covers bills due by ${short(s.end)}.</div>`:""}
@@ -960,6 +960,7 @@ function depositPlan(amt,src,dateS,goal){
   let left=amt;const auto=[];
   for(const x of r.splits||[]){const v=Math.min(left,Math.max(0,+x.amt||0));if(v>0){add(x.to,v);auto.push({to:x.to,amt:v});left-=v}}
   const spend=r.spend&&!goal?Math.min(left,Math.round(POOLS.reduce((s,p)=>s+c[p].budget,0)*perCheckFactor()*100)/100):0;left-=spend;
+  add(P.refillFrom||r.home,spend); // the spending money stays in the account the cards spend from
   add(r.home,left);
   const d=dn(dateS||todayS()),end=Math.max(d,dn(todayS()))+14,due=chaseDueUntil(end),chase=acctBal("chase");
   let move=0;if(r.cover&&r.home!=="chase"){const short=Math.max(0,due.sum-chase-(out.chase||0));move=Math.min(short,out[r.home]||0);if(move>0){add(r.home,-move);add("chase",move)}}
@@ -2027,7 +2028,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202610090711";
+const BUILD="202610090717";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
