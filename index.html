@@ -313,7 +313,7 @@ function simpleView(me,self){
   return `
   ${self?`<div style="display:flex;justify-content:flex-end;margin-bottom:6px"><button class="btn ghost sm" data-act="simpleview" data-v="0">Full app</button></div>`:S.owner?`<header><div><div class="label">Preview</div><h1 class="brand"><img src="icon.svg" alt="" class="logo">${esc(NAMES.grace)}'s screen</h1></div><button class="btn ghost sm" data-act="view" data-v="aspen">Back to my view</button></header>`:""}
   <div style="margin-bottom:10px">${statusPair(c,me)}</div>
-  ${self&&S.owner?`${refillDueCard(c)}${splurgeCard(c)}`:""}
+  ${self&&S.owner?refillDueCard(c):""}
   <nav class="seg gtabs" role="tablist" style="margin-top:4px">${tabs.map(([k,l])=>`<button type="button" role="tab" data-act="gtab" data-k="${esc(k)}" aria-pressed="${k===tab}">${esc(l)}</button>`).join("")}</nav>
   <div class="card hero ${left<0?"over":""}">
     <div class="label">${esc(who)} money left</div>
@@ -2027,7 +2027,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202610090703";
+const BUILD="202610090711";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
