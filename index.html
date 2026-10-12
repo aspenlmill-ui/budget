@@ -398,6 +398,7 @@ function logForm(pool,grace){
     <h2>Log a purchase</h2>
     <div class="seg" style="flex-wrap:wrap" role="group" aria-label="Whose money">${pools.map(p=>`<button type="button" data-act="pool" data-p="${esc(p)}" aria-pressed="${p===pool}" style="flex:1 1 auto">${grace&&p==="grace"?"Mine":esc(poolName(p))}</button>`).join("")}</div>
     ${isEv?`<div class="chip">${m2(evStats(S.events.find(e=>"event:"+e.id===pool)).left)} left in ${esc(poolName(pool))}</div>`:""}
+    ${isEv&&!grace&&S.plan?`<label class="f">Came out of<select id="lf-acct">${acctList().map(a=>`<option value="${esc(a.k)}" ${a.k===(linkOf(pool)||"usaa")?"selected":""}>${esc(a.name)}</option>`).join("")}</select></label>`:""}
     <div class="row">
       <label class="f">Amount<input id="lf-amt" inputmode="decimal" placeholder="0.00" autocomplete="off" required></label>
       <label class="f">What was it?<input id="lf-note" placeholder="${pool==="household"?"Kroger":"Gas"}" autocomplete="off"></label>
@@ -545,7 +546,7 @@ function spendCard(){
       ${bk.length?`<optgroup label="Savings buckets">${bk.map(x=>`<option value="${x.k}" ${x.k===sel?"selected":""}>${esc(x.name)}</option>`).join("")}</optgroup>`:""}</select></label>
     <div class="row"><label class="f">Amount<input id="sp-amt" inputmode="decimal" placeholder="0.00"></label>
       <label class="f">What for<input id="sp-note" placeholder="U-Haul deposit"></label></div>
-    ${sel.startsWith("bk:")?`<label class="f">Came out of<select id="sp-acct">${acctList().map(a=>`<option value="${esc(a.k)}" ${a.k==="usaa"?"selected":""}>${esc(a.name)}</option>`).join("")}</select></label>`:""}
+    ${S.plan?`<label class="f">Came out of<select id="sp-acct">${acctList().map(a=>`<option value="${esc(a.k)}" ${a.k===(sel.startsWith("ev:")?(linkOf("event:"+sel.slice(3))||"usaa"):"usaa")?"selected":""}>${esc(a.name)}</option>`).join("")}</select></label>`:""}
     <button class="btn" type="submit">Log it</button>
     <div class="spend-left ${cur.left<0?"neg":""}"><span>${esc(cur.name)} left</span><b class="num">${m2(cur.left)}</b>${cur.of!=null?`<span class="small muted">of ${m0(cur.of)}</span>`:""}</div>
   </form>`;
@@ -556,7 +557,7 @@ document.addEventListener("submit",async e=>{
   const k=val("sp-to"),amt=num(val("sp-amt")),note=val("sp-note").trim().slice(0,80);if(!(amt>0)){toast("Enter the amount");return}
   S.spendSel=k;if(logBusy)return;
   if(k.startsWith("ev:")){logBusy=true;const btn=e.target.querySelector('button[type="submit"]');if(btn){btn.disabled=true;btn.textContent="Saving…"}
-    try{await db.collection("txns").add({pool:"event:"+k.slice(3),amount:amt,note,cat:"",from:"week",date:todayS()});logBusy=false}catch(err){logBusy=false;render();fail(err);return}}
+    try{await db.collection("txns").add({pool:"event:"+k.slice(3),amount:amt,note,cat:"",from:"week",date:todayS(),acct:document.getElementById("sp-acct")?val("sp-acct"):null});logBusy=false}catch(err){logBusy=false;render();fail(err);return}}
   else{payFromBucket(+k.slice(3),amt,val("sp-acct")||"usaa",note,false);render();savePlan()}
   const cur=[...spendTargets().ev,...spendTargets().bk].find(x=>x.k===k)||(k.startsWith("bk:")?{name:S.plan.goals[+k.slice(3)].name,left:S.plan.goals[+k.slice(3)].saved}:null);
   toast(cur?`${m2(amt)} logged · ${cur.name}: ${m2(cur.left)} left`:`${m2(amt)} logged`);
@@ -913,7 +914,7 @@ function linkOf(pool){const m=S.plan?.cardAcct||{};return String(pool).startsWit
 function splurgeAcct(){const P=S.plan||{};return P.splurgeAcct||P.refillFrom||""}
 /* A card's leftovers stay in the account it spends from, so its splurge lives there too. */
 function splurgeAcctOf(p){return linkOf(p)||splurgeAcct()}
-function txAcct(t){return t.from==="cushion"&&!String(t.pool).startsWith("event:")?splurgeAcctOf(t.cushPool||t.pool):linkOf(t.pool)}
+function txAcct(t){if(t.acct)return t.acct;return t.from==="cushion"&&!String(t.pool).startsWith("event:")?splurgeAcctOf(t.cushPool||t.pool):linkOf(t.pool)}
 function splurgePots(c){const m={};for(const p of POOLS){const a=splurgeAcctOf(p)||"all";(m[a]=m[a]||{acct:a,pools:[],total:0}).pools.push(p);m[a].total+=c[p].cushion}
   return Object.values(m).map(x=>({...x,total:Math.round(x.total*100)/100})).sort((a,b)=>a.acct==="usaa"?-1:b.acct==="usaa"?1:0)}
 function epAcct(ep){ep=String(ep);if(ep==="in")return "";const [k,p]=ep.split(":");
@@ -1689,7 +1690,7 @@ document.addEventListener("submit",async e=>{
         const c=compute(),pot=splurgePots(c).find(x=>"pot:"+x.acct===v),amt0=num(val("lf-amt"))||0;if(!pot)return {from:"week"};
         const mine=pot.pools.includes(pool)&&c[pool].cushion>=amt0?pool:[...pot.pools].sort((a,b)=>c[b].cushion-c[a].cushion)[0];
         return {from:"cushion",cushPool:mine}})(),
-      date:val("lf-date")||todayS(),ts:Date.now(),by:S.owner?"owner":"partner"};
+      date:val("lf-date")||todayS(),ts:Date.now(),by:S.owner?"owner":"partner",acct:String(pool).startsWith("event:")&&document.getElementById("lf-acct")?val("lf-acct"):null};
     if(logBusy)return;logBusy=true;
     const btn=f.querySelector('button[type="submit"]');if(btn){btn.disabled=true;btn.textContent="Saving…"}
     const aEl=document.getElementById("lf-amt"),nEl=document.getElementById("lf-note"),was=[aEl?.value,nEl?.value];
@@ -1978,7 +1979,7 @@ const VAPID="BHF-8MfnRIpMduuGXC0PScG1sci3JbouOLAsmCK3V1PwDGyjdm9UVm7wqTsG8QhzrHo
 const sb=window.supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
 let HID=null,ME=null,channel=null;
 const chk=r=>{if(r.error)throw r.error;return r.data};
-const mapTx=r=>({id:r.id,cushPool:r.cush_pool||null,pool:r.pool,amount:+r.amount,note:r.note||"",cat:r.cat||"",from:r.src,date:r.date,ts:Date.parse(r.created_at),mine:r.created_by===ME});
+const mapTx=r=>({id:r.id,acct:r.acct||null,cushPool:r.cush_pool||null,pool:r.pool,amount:+r.amount,note:r.note||"",cat:r.cat||"",from:r.src,date:r.date,ts:Date.parse(r.created_at),mine:r.created_by===ME});
 const mapMv=r=>({id:r.id,from:r.from_ep,to:r.to_ep,amount:+r.amount,reason:r.reason||"",date:r.date,ts:Date.parse(r.created_at)});
 const mapEv=r=>({id:r.id,name:r.name,budget:+r.budget,active:r.active,created:Date.parse(r.created_at)});
 const LOAD={
@@ -2000,7 +2001,7 @@ db={
       else if(c==="private"){chk(await sb.from("wb_plan").upsert({household_id:HID,data:body,updated_at:now}))}},
     async update(patch){chk(await sb.from(TBL[c]).update(patch).eq("id",id));await LOAD[c]();render()}}},
   collection(c){return{async add(d){
-    if(c==="txns"){const row=chk(await sb.from("wb_txns").insert({household_id:HID,pool:d.pool,amount:d.amount,src:d.from==="cushion"?"cushion":"week",cush_pool:d.from==="cushion"&&d.cushPool?d.cushPool:null,date:d.date}).select("id").single());
+    if(c==="txns"){const row=chk(await sb.from("wb_txns").insert({household_id:HID,pool:d.pool,amount:d.amount,src:d.from==="cushion"?"cushion":"week",cush_pool:d.from==="cushion"&&d.cushPool?d.cushPool:null,acct:d.acct||null,date:d.date}).select("id").single());
       let receipt=null;
       if(d.receiptBlob){const path=`${ME}/${row.id}.jpg`;const up=await sb.storage.from("receipts").upload(path,d.receiptBlob,{contentType:"image/jpeg",upsert:true});if(up.error)toast("Saved, but the receipt photo didn't upload");else receipt=path}
       if(d.note||d.cat||receipt)chk(await sb.from("wb_txn_notes").insert({txn_id:row.id,household_id:HID,shared:!["aspen","grace"].includes(d.pool),note:d.note||null,cat:d.cat||null,receipt}))}
@@ -2046,7 +2047,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202610121916";
+const BUILD="202610121920";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
