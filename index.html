@@ -545,6 +545,7 @@ function spendCard(){
       ${bk.length?`<optgroup label="Savings buckets">${bk.map(x=>`<option value="${x.k}" ${x.k===sel?"selected":""}>${esc(x.name)}</option>`).join("")}</optgroup>`:""}</select></label>
     <div class="row"><label class="f">Amount<input id="sp-amt" inputmode="decimal" placeholder="0.00"></label>
       <label class="f">What for<input id="sp-note" placeholder="U-Haul deposit"></label></div>
+    ${sel.startsWith("bk:")?`<label class="f">Came out of<select id="sp-acct">${acctList().map(a=>`<option value="${esc(a.k)}" ${a.k==="usaa"?"selected":""}>${esc(a.name)}</option>`).join("")}</select></label>`:""}
     <button class="btn" type="submit">Log it</button>
     <div class="spend-left ${cur.left<0?"neg":""}"><span>${esc(cur.name)} left</span><b class="num">${m2(cur.left)}</b>${cur.of!=null?`<span class="small muted">of ${m0(cur.of)}</span>`:""}</div>
   </form>`;
@@ -556,8 +557,7 @@ document.addEventListener("submit",async e=>{
   S.spendSel=k;if(logBusy)return;
   if(k.startsWith("ev:")){logBusy=true;const btn=e.target.querySelector('button[type="submit"]');if(btn){btn.disabled=true;btn.textContent="Saving…"}
     try{await db.collection("txns").add({pool:"event:"+k.slice(3),amount:amt,note,cat:"",from:"week",date:todayS()});logBusy=false}catch(err){logBusy=false;render();fail(err);return}}
-  else{const g=S.plan.goals[+k.slice(3)];g.saved=Math.round(((+g.saved||0)-amt)*100)/100;acctAdjust("usaa",-amt);
-    S.plan.spendLog=(S.plan.spendLog||[]).concat([{goal:g.name,amt,note,date:todayS()}]).slice(-100);render();savePlan()}
+  else{payFromBucket(+k.slice(3),amt,val("sp-acct")||"usaa",note,false);render();savePlan()}
   const cur=[...spendTargets().ev,...spendTargets().bk].find(x=>x.k===k)||(k.startsWith("bk:")?{name:S.plan.goals[+k.slice(3)].name,left:S.plan.goals[+k.slice(3)].saved}:null);
   toast(cur?`${m2(amt)} logged · ${cur.name}: ${m2(cur.left)} left`:`${m2(amt)} logged`);
 });
@@ -1153,6 +1153,14 @@ function vaultTab(){
     </div>
   </section>`;
 }
+/* Paying for something out of a savings bucket: shrink the bucket and take it out of the account it was paid from. */
+function payFromBucket(i,amt,acct,note,markDone){const P=S.plan,g=P.goals[i];if(!g)return;
+  g.saved=Math.round(Math.max(0,(+g.saved||0)-amt)*100)/100;acctAdjust(acct,-amt);if(markDone)g.done=true;
+  P.spendLog=(P.spendLog||[]).concat([{goal:g.name,amt,note,date:todayS(),acct}]).slice(-200)}
+document.addEventListener("submit",e=>{if(e.target.id!=="gpayf")return;e.preventDefault();
+  const i=+e.target.dataset.i,amt=num(val("gp2-amt")),acct=val("gp2-acct")||"usaa";if(!(amt>0)){toast("Enter the amount paid");return}
+  const g=S.plan.goals[i];payFromBucket(i,amt,acct,val("gp2-note").trim().slice(0,80),document.getElementById("gp2-done")?.checked);
+  S.payGoal=null;render();savePlan();toast(`${m2(amt)} paid from ${acctName(acct)} · ${g.name}: ${m2(+g.saved||0)} left`)});
 function bucketRow(g,i,n){
   if(S.editGoal===i)return goalEditForm(g,i,n);
   const open=S.openGoal===i,t=+g.target,sv=+g.saved||0,full=t>0&&sv>=t;
@@ -1165,8 +1173,16 @@ function bucketRow(g,i,n){
     </button>
     ${open?`<div class="bk-actions">
       ${g.done?"":`<input id="gadd-${i}" inputmode="decimal" placeholder="Amount"><button class="btn sm" data-act="gadd" data-i="${i}">Add</button><button class="btn sm ghost" data-act="gtake" data-i="${i}">Take out</button>`}
+      <button class="btn sm ghost" data-act="gpay" data-i="${i}">Paid for it</button>
       <button class="btn sm ghost" data-act="gedit" data-i="${i}">Edit</button>
-      <button class="btn sm ghost" data-act="gdone2" data-i="${i}">${g.done?"Not done":"Mark done"}</button></div>`:""}
+      <button class="btn sm ghost" data-act="gdone2" data-i="${i}">${g.done?"Not done":"Mark done"}</button></div>
+      ${S.payGoal===i?`<form class="bk-pay" id="gpayf" data-i="${i}" style="padding:4px 12px 12px">
+        <div class="row"><label class="f">Amount paid<input id="gp2-amt" inputmode="decimal" value="${sv>0?esc(sv):""}" placeholder="0.00"></label>
+          <label class="f">Came out of<select id="gp2-acct">${acctList().map(a=>`<option value="${esc(a.k)}" ${a.k==="usaa"?"selected":""}>${esc(a.name)} (${m2(acctBal(a.k))})</option>`).join("")}</select></label></div>
+        <label class="f">What for<input id="gp2-note" placeholder="${esc(g.name)}"></label>
+        <label class="check small"><input type="checkbox" id="gp2-done" ${t>0&&sv>=t?"checked":""}> This is paid off, mark the bucket done</label>
+        <div class="small muted">Takes it out of the bucket and out of that account's balance.</div>
+        <div class="row"><button class="btn" type="submit">Save payment</button><button class="btn ghost" type="button" data-act="gpay" data-i="${i}">Cancel</button></div></form>`:""}`:""}
   </div>`;
 }
 function goalEditForm(g,i,n){return `<form class="goal" id="goaledit" data-i="${i}">
@@ -1568,6 +1584,7 @@ document.addEventListener("click",async e=>{
   if(a==="delroute"){S.plan.routing.splice(+b.dataset.i,1);render();savePlan();return}
   if(a==="period"){try{await setPeriod(b.dataset.v)}catch(err){fail(err)}return}
   if(a==="theme"){setTheme(b.dataset.v);render();return}
+  if(a==="gpay"){const i=+b.dataset.i;S.payGoal=S.payGoal===i?null:i;render();return}
   if(a==="gopen"){const i=+b.dataset.i;S.openGoal=S.openGoal===i?null:i;render();return}
   if(a==="gdone2"){const g=S.plan.goals[+b.dataset.i];g.done=!g.done;S.openGoal=null;render();savePlan();return}
   if(a==="gedit"){S.editGoal=+b.dataset.i;render();return}
@@ -1833,6 +1850,7 @@ function acctLedger(c,i){
       const left=budgetFor(p,prev)+(r.adj[prev]||0)-(r.carry[prev]||0)-(r.spent[prev]||0),top=Math.max(0,budgetFor(p,w)-(r.carry[w]||0)-left);
       add(src,-top,`Refill to ${acctName(a)}`,`${NAMES[p]}'s top-up`,ts);add(a,top,`Refill from ${acctName(src)}`,`${NAMES[p]}'s top-up`,ts)}}
   for(const x of P.paidLog||[])if(!x.skipped&&x.date&&inW(x.date)){const nm=x.key.split("|")[0],b=(P.bills||[]).find(y=>y.name===nm);add(x.acct||(b?billAcct(b):""),-(+x.amount||0),nm,"Bill paid",Date.parse(x.date+"T12:00:00"))}
+  for(const x of P.spendLog||[])if(x.date&&inW(x.date))add(x.acct||"usaa",-(+x.amt||0),x.note||x.goal,`From the ${x.goal} bucket`,Date.parse(x.date+"T12:00:00"));
   for(const x of P.income||[])if(x.applied&&inW(x.date)){const src2=(incomeSources().find(s=>s[0]===x.src)||[,"Income"])[1];for(const [k,v] of Object.entries(x.applied))add(k,+v,src2,x.note||"Deposit",Date.parse(x.date+"T12:00:00"))}
   return E}
 function acctLedgerHtml(E){if(!E.length)return "";
@@ -2028,7 +2046,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202610090717";
+const BUILD="202610121916";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
