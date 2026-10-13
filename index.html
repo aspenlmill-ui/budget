@@ -457,7 +457,7 @@ function rescueOptions(c,p){
   add(`next:${p}`,`${NAMES[p]} next ${PER().noun}`,nb,`Next ${PER().noun} ${NAMES[p]} gets less, so it evens out.`,3);
   if(p!=="extras")add("week:extras",`${NAMES.extras} ${PER().this}`,c.extras.left,"That's what Extras is for.",4);
   for(const q of POOLS)if(q!==p&&q!=="extras"){const room=c[q].left-Math.max(0,c[q].alloc*(1-f));add(`week:${q}`,`${NAMES[q]} ${PER().this}`,Math.max(0,room),`${NAMES[q]} is under pace, so there's room.`,5)}
-  if(S.plan){const P=S.plan,bal=acctBal("usaa"),inB=(P.goals||[]).filter(g=>!g.done).reduce((s,g)=>s+(+g.saved||0),0),free=Math.max(0,bal-Math.max(+P.floor||0,0)-inB);
+  if(S.plan){const P=S.plan,bal=acctBal("usaa"),inB=(P.goals||[]).filter(g=>!g.done).reduce((s,g)=>s+(+g.saved||0),0),free=Math.max(0,bal-Math.max(+P.floor||0,inB,0));
     add("usaa",`${L().save} (unassigned savings)`,free,"Real savings. Use it if nothing above covers it.",6)}
   opts.sort((a,b)=>a.tier-b.tier||b.amt-a.amt);
   return {need,opts};
@@ -1139,8 +1139,10 @@ function vaultTab(){
         ${(()=>{const due=monthBillsLeft().filter(x=>x.acct==="usaa").reduce((s,x)=>s+x.amt,0),f=Math.round((above-due)*100)/100;
           return `<span>${esc(lb.save)} bills left this month</span><b class="num">−${m2(due)}</b>
           <span class="tot">Free after this month's bills</span><b class="num tot" style="color:${f<0?"var(--bad)":"var(--good)"}">${m2(f)}</b>`})()}</div>
-      <label class="f" style="margin-top:8px">Protected floor<input data-plan="floor" inputmode="decimal" value="${esc(P.floor??"")}"></label>
-      <span class="chip ${above<0?"bad":above<500?"warn":""}" style="margin-top:8px">${above<0?"Below the floor. Pause extra goals until it refills.":above<500?"Close to the floor":"Floor is safe"}</span>
+      <div class="row" style="margin-top:8px"><label class="f">Protected floor<input data-plan="floor" inputmode="decimal" value="${esc(P.floor??"")}"></label>
+        <label class="f">OK to dip under it by<input data-plan="floorDip" inputmode="decimal" value="${esc(P.floorDip??"")}" placeholder="0"></label></div>
+      <div class="small muted">The floor counts everything in ${esc(lb.save)}, buckets included. Never let ${esc(lb.save)} go under ${m0(floor-(+P.floorDip||0))}.</div>
+      <span class="chip ${above<-(+P.floorDip||0)?"bad":above<0||above<500?"warn":""}" style="margin-top:8px">${above<-(+P.floorDip||0)?`${m2(-above-(+P.floorDip||0))} past your limit of ${m0(floor-(+P.floorDip||0))}. Pause extra spending and goals until it refills.`:above<0?`${m2(-above)} under the floor, still inside your ${m0(+P.floorDip||0)} dip`:above<500?"Close to the floor":"Floor is safe"}</span>
       ${free<0?`<div class="chip bad" style="margin-top:6px">Buckets add up to more than ${esc(lb.save)} has. Take some back out.</div>`:""}
     </div>
 
@@ -1225,7 +1227,7 @@ function runScenario(amt,pool){
   if(pool!=="extras"){take(`${NAMES.extras} ${PER().this}`,c.extras.left,"week:extras");take(`${NAMES.extras} cushion`,c.extras.cushion,"cushion:extras")}
   for(const q of POOLS)if(q!==pool&&q!=="extras")take(`${NAMES[q]}'s cushion`,c[q].cushion,`cushion:${q}`);
   if(S.plan){const P=S.plan,bal=acctBal("usaa"),inB=(P.goals||[]).filter(g=>!g.done).reduce((s,g)=>s+(+g.saved||0),0);
-    take(`${L().save}, unassigned and above the floor`,Math.max(0,bal-Math.max(+P.floor||0,0)-inB),"usaa")}
+    take(`${L().save}, above the floor`,Math.max(0,bal-Math.max(+P.floor||0,inB,0)),"usaa")}
   return {steps,short:Math.max(0,Math.round(need*100)/100),pool,amt};
 }
 function scenarioCard(){
@@ -2047,7 +2049,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202610121920";
+const BUILD="202610122013";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
