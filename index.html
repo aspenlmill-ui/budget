@@ -625,7 +625,8 @@ function refillDue(c){
     if(top>0.004)out.push({p,top,left,from:src,to:a})}
   return out}
 function refillDueCard(c){const due=refillDue(c);if(!due.length)return "";
-  let done=false;try{done=localStorage.getItem("fb-sent")===todayS()}catch(_){}
+  let done=S.prefs?.sent===todayS();try{done=done||localStorage.getItem("fb-sent")===todayS()}catch(_){}
+  if(done)return "";
   return `<div class="card" style="border-color:var(--good);${done?"opacity:.6":""}"><h2>${done?"✓ Sent":"Refill day: send today"}</h2>
     <div class="list">${due.map(x=>`<div class="item"><div class="grow"><div><b>${esc(NAMES[x.p])}</b>${x.from&&x.to?` <span class="small muted">${esc(acctName(x.from))} → ${esc(acctName(x.to))}</span>`:""}</div>
       <div class="small muted">${m2(x.left)} was left from last ${esc(PER().noun)}, so only the difference goes over</div></div><b class="num" style="font-size:20px">${m2(x.top)}</b></div>`).join("")}</div>
@@ -1582,7 +1583,7 @@ document.addEventListener("click",async e=>{
   if(a==="scadd"){payCalc().rows.push({base:80,ot:0});render();savePlan();return}
   if(a==="scdel"){const pc=payCalc();pc.rows.splice(+b.dataset.i,1);render();savePlan();return}
   if(a==="tab"){S.tab=b.dataset.t;render();return}
-  if(a==="sent"){try{localStorage.setItem("fb-sent",b.dataset.v==="1"?todayS():"")}catch(_){}render();return}
+  if(a==="sent"){const on=b.dataset.v==="1";try{localStorage.setItem("fb-sent",on?todayS():"")}catch(_){}S.prefs=S.prefs||{};S.prefs.sent=on?todayS():"";render();savePrefs();if(on)toast("Marked as sent");return}
   if(a==="view"){S.view=b.dataset.v;render();window.scrollTo(0,0);return}
   if(a==="pool"){e.preventDefault();if(S.view==="grace")S.gPool=b.dataset.p;else S.aPool=b.dataset.p;render();document.getElementById("lf-amt")?.focus();return}
   if(a==="newweek"){if(!arm(b,`Tap again to start a new ${PER().noun}`))return;
@@ -2092,7 +2093,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202610160558";
+const BUILD="202610160602";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
