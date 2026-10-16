@@ -355,6 +355,33 @@ function evStats(e){const key="event:"+e.id;
   let budget=+e.budget||0;for(const m of S.moves){if(m.to===key)budget+=m.amount;if(m.from===key)budget-=m.amount}
   const tx=S.txns.filter(t=>t.pool===key).sort((a,b)=>b.ts-a.ts);const spent=tx.reduce((s,t)=>s+t.amount,0);
   return {budget,spent,left:budget-spent,tx}}
+/* Special budget breakdown: every purchase, newest first, each one editable. */
+function evBreakdown(e,s){const key="event:"+e.id,moved=s.budget-(+e.budget||0);
+  const rows=[...s.tx].sort((a,b)=>(b.date>a.date?1:b.date<a.date?-1:(b.ts||0)-(a.ts||0)));
+  return `<details ${S.evOpen===e.id?"open":""} data-ev="${esc(e.id)}"><summary class="small"><b>Where it went</b> · ${rows.length} purchase${rows.length>1?"s":""}</summary>
+    <div class="list">${rows.map(t=>S.txEdit===t.id?txEditForm(t):`<div class="item"><div class="grow"><div>${esc(t.note||t.cat||"Purchase")}</div>
+      <div class="muted small">${short(dn(t.date))}${S.plan?" · "+esc(acctName(txAcct(t)||"usaa")):""}</div></div>
+      <b class="num">${m2(t.amount)}</b><button class="x" data-act="txedit" data-id="${esc(t.id)}" data-ev="${esc(e.id)}">Edit</button></div>`).join("")}</div>
+    <div class="kv" style="margin-top:6px"><span>Budget${moved?` <span class="small muted">(${m0(+e.budget||0)} ${moved>0?"+":"−"} ${m2(Math.abs(moved))} moved)</span>`:""}</span><b class="num">${m2(s.budget)}</b></div>
+    <div class="kv"><span>Spent</span><b class="num">−${m2(s.spent)}</b></div>
+    <div class="kv tot"><span><b>Left</b></span><b class="num" style="color:${s.left<0?"var(--bad)":"inherit"}">${m2(s.left)}</b></div></details>`}
+function txEditForm(t){
+  return `<form class="item payform" id="txef" data-id="${esc(t.id)}" style="flex-wrap:wrap">
+    <div class="row" style="flex-basis:100%"><label class="f">Amount<input id="te-amt" inputmode="decimal" value="${esc(t.amount)}"></label>
+      <label class="f">What was it?<input id="te-note" value="${esc(t.note||"")}" ${t.mine||S.owner?"":"disabled"}></label></div>
+    <div class="row" style="flex-basis:100%"><label class="f">Date<input type="date" id="te-date" value="${esc(t.date)}"></label>
+      ${S.plan?`<label class="f">Came out of<select id="te-acct">${acctList().map(a=>`<option value="${esc(a.k)}" ${a.k===(txAcct(t)||"usaa")?"selected":""}>${esc(a.name)}</option>`).join("")}</select></label>`:""}</div>
+    <div class="row" style="flex-basis:100%"><button class="btn" type="submit">Save</button><button class="btn ghost" type="button" data-act="txcancel">Cancel</button>
+      <button class="x" type="button" data-act="deltx" data-id="${esc(t.id)}" style="color:var(--bad)">Delete</button></div></form>`}
+document.addEventListener("submit",async e=>{if(e.target.id!=="txef")return;e.preventDefault();
+  const id=e.target.dataset.id,t=S.txns.find(x=>String(x.id)===String(id));if(!t)return;
+  const amt=num(val("te-amt"));if(!(amt>0)){toast("Enter the amount");return}
+  const patch={amount:amt,date:val("te-date")||t.date};if(document.getElementById("te-acct"))patch.acct=val("te-acct");
+  const note=val("te-note").trim().slice(0,80),btn=e.target.querySelector('button[type="submit"]');if(btn){btn.disabled=true;btn.textContent="Saving…"}
+  try{if(note!==(t.note||"")){const r=await sb.from("wb_txn_notes").update({note:note||null}).eq("txn_id",id).select("txn_id");
+      if(!r.error&&!(r.data||[]).length)chk(await sb.from("wb_txn_notes").insert({txn_id:id,household_id:HID,shared:!["aspen","grace"].includes(t.pool),note:note||null,cat:t.cat||null}));else chk(r)}
+    S.txEdit=null;await db.doc("txns/"+id).update(patch);toast("Saved")}
+  catch(err){fail(err);if(btn){btn.disabled=false;btn.textContent="Save"}}});
 function eventCard(e,owner){const s=evStats(e);
   if(owner&&S.evEdit===e.id)return `<form class="card form" id="evedf" data-id="${esc(e.id)}"><h2>Edit ${esc(e.name)}</h2>
     <div class="row"><label class="f">Name<input id="ee-name" value="${esc(e.name)}" autocomplete="off"></label>
@@ -368,7 +395,7 @@ function eventCard(e,owner){const s=evStats(e);
   <div class="left num">${m2(s.left)}</div>
   <div class="bar"><i style="width:${pct(s.spent,s.budget)}%"></i></div>
   <div class="muted small">${m2(s.spent)} spent of ${m2(s.budget)}${s.left<0?` · ${m2(-s.left)} over`:""}</div>
-  ${owner&&s.tx.length?`<details><summary class="small">What was bought (${s.tx.length})</summary>${txList(s.tx,false,true)}</details>`:""}
+  ${owner&&s.tx.length?evBreakdown(e,s):""}
   ${owner?`<div class="row" style="margin-top:4px">${e.active===false
       ?`<button class="btn sm ghost" data-act="evopen" data-id="${esc(e.id)}">Reopen</button>`
       :`<button class="btn sm ghost" data-act="evclose" data-id="${esc(e.id)}">Close it out</button>`}<button class="btn sm ghost" data-act="evedit" data-id="${esc(e.id)}">Edit or delete</button></div>`:""}
@@ -1587,6 +1614,8 @@ document.addEventListener("click",async e=>{
   if(a==="delroute"){S.plan.routing.splice(+b.dataset.i,1);render();savePlan();return}
   if(a==="period"){try{await setPeriod(b.dataset.v)}catch(err){fail(err)}return}
   if(a==="theme"){setTheme(b.dataset.v);render();return}
+  if(a==="txedit"){S.txEdit=b.dataset.id;S.evOpen=b.dataset.ev||S.evOpen;render();return}
+  if(a==="txcancel"){S.txEdit=null;render();return}
   if(a==="gpay"){const i=+b.dataset.i;S.payGoal=S.payGoal===i?null:i;render();return}
   if(a==="gopen"){const i=+b.dataset.i;S.openGoal=S.openGoal===i?null:i;render();return}
   if(a==="gdone2"){const g=S.plan.goals[+b.dataset.i];g.done=!g.done;S.openGoal=null;render();savePlan();return}
@@ -2049,7 +2078,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202610122013";
+const BUILD="202610152101";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
