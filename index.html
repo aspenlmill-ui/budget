@@ -289,6 +289,7 @@ function render(){
   if(!db){app.innerHTML=`<header><div><div class="label">Family Budget</div><h1>Family Budget</h1></div></header><div class="empty">This budget syncs through Claude. Open it from the Claude app or claude.ai while signed in to see and log spending.</div>`;return}
   if(!S.settingsLoaded){return}
   if(!S.settings){app.innerHTML=S.owner?firstRun():`<header><div><div class="label">Family Budget</div><h1>Almost ready</h1></div></header><div class="empty">This budget hasn't been set up yet. Once the owner sets it up, your weekly number shows here.</div>`;return}
+  syncDebtGoals();
   const keep={a:document.getElementById("lf-amt")?.value,n:document.getElementById("lf-note")?.value};
   app.innerHTML=S.view==="aspen"?(S.prefs?.simple?(S.showHist?historyTab(true):simpleView(S.owner?"aspen":"grace",true)):aspenView()):graceView();
   if(keep.a&&document.getElementById("lf-amt"))document.getElementById("lf-amt").value=keep.a;
@@ -1217,6 +1218,12 @@ function bucketRow(g,i,n){
   </div>`;
 }
 /* Money in buckets that actually sits in USAA (buckets kept as cash don't). */
+/* A debt's balance goes down by every payment on a bill linked to it, counted from the day the balance was last typed in. */
+function debtPaid(d){const P=S.plan||{},names=new Set((P.bills||[]).filter(b=>b.debt===d.name).map(b=>b.name));if(!names.size||!d.asOf)return 0;
+  return (P.paidLog||[]).filter(x=>!x.skipped&&names.has(x.key.split("|")[0])&&(x.date||"")>d.asOf).reduce((s,x)=>s+(+x.amount||0),0)}
+function debtBal(d){return Math.round(Math.max(0,(+d.bal||0)-debtPaid(d))*100)/100}
+/* A payoff bucket linked to a debt aims for what's still owed. */
+function syncDebtGoals(){const P=S.plan;if(!P)return;for(const g of P.goals||[]){if(!g.debt)continue;const d=(P.debts||[]).find(x=>x.name===g.debt);if(d)g.target=debtBal(d)}}
 function inUsaaBuckets(P){return (P.goals||[]).filter(g=>!g.done&&!g.cash).reduce((s,g)=>s+(+g.saved||0),0)}
 function goalEditForm(g,i,n){return `<form class="goal" id="goaledit" data-i="${i}">
   <label class="f">Name<input id="ge-name" value="${esc(g.name)}"></label>
@@ -1347,6 +1354,7 @@ function billForm(b,i){
     <label class="f">Due day (1–31)<input id="bl-day" inputmode="numeric" value="${dayOf(b)??""}" placeholder="Leave blank if there's no set date"></label>
     <div class="row"><label class="f">Paid from<select id="bl-from">${acctList().map(a=>{const v=a.k==="chase"?"bills":a.k==="usaa"?"savings":a.k;return `<option value="${esc(v)}" ${billAcct(b)===a.k?"selected":""}>${esc(a.name)}</option>`}).join("")}</select></label>
       ${closingOn()?`<label class="f">When<select id="bl-phase"><option value="both" ${!b.phase||b.phase==="both"?"selected":""}>Always</option><option value="pre" ${b.phase==="pre"?"selected":""}>Until closing</option><option value="post" ${b.phase==="post"?"selected":""}>After closing</option></select></label>`:""}</div>
+    ${(S.plan.debts||[]).length?`<label class="f">Pays down a debt<select id="bl-debt"><option value="">No</option>${S.plan.debts.map(d=>`<option value="${esc(d.name)}" ${b.debt===d.name?"selected":""}>${esc(d.name)}</option>`).join("")}</select></label>`:""}
     <div class="small muted" id="bl-hint">${billHint(va,ap,!!dayOf(b))}</div>
     <div class="row"><button class="btn" type="submit">Save</button><button class="btn ghost" type="button" data-act="billcancel">Cancel</button></div>
     ${i!=="new"?`<button class="x" type="button" data-act="delbill" data-i="${i}" style="color:var(--bad);align-self:flex-start">Delete this bill</button>`:""}
@@ -1408,9 +1416,9 @@ function planTab(){
     ${payPlanner(P,c,perCheck,spend,gNet,post)}
 
     <div class="card"><h2>Debts</h2>
-      ${(P.debts||[]).map((d,i)=>`<div class="bill"><div style="min-width:0"><div>${esc(d.name)}</div>${d.note?`<div class="meta">${esc(d.note)}</div>`:""}</div>
-        <input data-plan="debts.${i}.bal" inputmode="decimal" value="${esc(d.bal)}" aria-label="${esc(d.name)} balance"><button class="x" data-act="deldebt" data-i="${i}" aria-label="Remove ${esc(d.name)}">✕</button></div>`).join("")}
-      <div class="kv"><span>Total</span><b>${m2((P.debts||[]).reduce((s,d)=>s+(+d.bal||0),0))}</b></div>
+      ${(P.debts||[]).map((d,i)=>`<div class="bill"><div style="min-width:0"><div>${esc(d.name)}</div>${d.note?`<div class="meta">${esc(d.note)}</div>`:""}${debtPaid(d)>0.004?`<div class="meta">${m2(debtPaid(d))} paid since ${short(dn(d.asOf))}</div>`:""}</div>
+        <input data-plan="debts.${i}.bal" inputmode="decimal" value="${esc(debtBal(d))}" aria-label="${esc(d.name)} balance"><button class="x" data-act="deldebt" data-i="${i}" aria-label="Remove ${esc(d.name)}">✕</button></div>`).join("")}
+      <div class="kv"><span>Total</span><b>${m2((P.debts||[]).reduce((s,d)=>s+debtBal(d),0))}</b></div>
       <form class="form" id="debtf"><div class="row">
         <label class="f">New debt<input id="df-name" placeholder="Car loan"></label>
         <label class="f">Balance<input id="df-amt" inputmode="decimal" placeholder="0"></label></div>
@@ -1678,7 +1686,7 @@ document.addEventListener("change",e=>{
     const v=parseInt(s,10);if(!(v>=1&&v<=31)){toast("Enter a day from 1 to 31");el.value=dayOf(b)??"";return}
     b.day=String(v);render();savePlan();toast(`${b.name} is now due the ${ordinal(v)}`);return}
   if(el.dataset.plan&&S.plan){const v=num(el.value);if(!isFinite(v)){toast("Enter a number");return}
-    setPath(S.plan,el.dataset.plan,v);if(el.dataset.plan.startsWith("accounts.")||el.dataset.plan.startsWith("otherAccts.")){S.plan.accounts.updated=todayS();
+    setPath(S.plan,el.dataset.plan,v);if(/^debts\.\d+\.bal$/.test(el.dataset.plan))S.plan.debts[+el.dataset.plan.split(".")[1]].asOf=todayS();if(el.dataset.plan.startsWith("accounts.")||el.dataset.plan.startsWith("otherAccts.")){S.plan.accounts.updated=todayS();
       const pa=el.dataset.plan.split("."),k=pa[0]==="accounts"?pa[1]:"x:"+(S.plan.otherAccts[+pa[1]]?.id);S.plan.acctAsOf={...(S.plan.acctAsOf||{}),[k]:Date.now()}}render();savePlan()}
   if(el.dataset.link!=null&&S.plan){const P=S.plan,k=el.dataset.link,v=el.value;P.cardAcct=P.cardAcct||{};
     const now=Date.now(),asOf=P.acctAsOf=P.acctAsOf||{};
@@ -1819,7 +1827,7 @@ document.addEventListener("submit",async e=>{
     if(ds_&&!(d>=1&&d<=31)){toast("Due day has to be 1 to 31");return}
     if(ap&&!ds_){toast("Autopay needs a due date");return}
     if(S.plan.bills.some((x,j)=>x.name.toLowerCase()===name.toLowerCase()&&String(j)!==String(i))){toast("You already have a bill with that name");return}
-    const fields={name,amt:isFinite(amt)?amt:0,variable:va,auto:ap,day:ds_?String(d):"",from:val("bl-from"),acct:acctName(val("bl-from")==="savings"?"usaa":val("bl-from")==="bills"?"chase":val("bl-from")),phase:document.getElementById("bl-phase")?val("bl-phase"):(i==="new"?"both":S.plan.bills[+i].phase||"both")};
+    const fields={name,amt:isFinite(amt)?amt:0,variable:va,auto:ap,day:ds_?String(d):"",from:val("bl-from"),acct:acctName(val("bl-from")==="savings"?"usaa":val("bl-from")==="bills"?"chase":val("bl-from")),phase:document.getElementById("bl-phase")?val("bl-phase"):(i==="new"?"both":S.plan.bills[+i].phase||"both"),...(document.getElementById("bl-debt")?{debt:val("bl-debt")||undefined}:{})};
     if(i==="new")S.plan.bills.push({...fields,added:todayS()});
     else{const b=S.plan.bills[+i];if(b.name!==name)renameBillKeys(b.name,name);Object.assign(b,fields)}
     S.billEdit=null;render();savePlan();toast(i==="new"?`Added ${name}`:"Saved")}
@@ -2084,7 +2092,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202610152200";
+const BUILD="202610152204";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
