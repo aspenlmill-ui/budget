@@ -624,6 +624,9 @@ function refillDue(c){
     const left=budgetFor(p,prev)+(r.adj[prev]||0)-(r.carry[prev]||0)-(r.spent[prev]||0),top=Math.round(Math.max(0,budgetFor(p,c.cw)+(r.nextIn[c.cw]||0)-(r.carry[c.cw]||0)-left)*100)/100;
     if(top>0.004)out.push({p,top,left,from:src,to:a})}
   return out}
+/* Once the refill is sent, clear the "Budgets refill tomorrow" notification from the phone's lock screen and notification list. */
+async function clearRefillPush(){try{if(!("serviceWorker" in navigator))return;const r=await navigator.serviceWorker.ready;if(!r.getNotifications)return;
+  for(const n of await r.getNotifications())if(/refill/i.test((n.title||"")+" "+(n.body||"")))n.close()}catch(_){}}
 function refillDueCard(c){const due=refillDue(c);if(!due.length)return "";
   let done=S.prefs?.sent===todayS();try{done=done||localStorage.getItem("fb-sent")===todayS()}catch(_){}
   if(done)return "";
@@ -1583,7 +1586,7 @@ document.addEventListener("click",async e=>{
   if(a==="scadd"){payCalc().rows.push({base:80,ot:0});render();savePlan();return}
   if(a==="scdel"){const pc=payCalc();pc.rows.splice(+b.dataset.i,1);render();savePlan();return}
   if(a==="tab"){S.tab=b.dataset.t;render();return}
-  if(a==="sent"){const on=b.dataset.v==="1";try{localStorage.setItem("fb-sent",on?todayS():"")}catch(_){}S.prefs=S.prefs||{};S.prefs.sent=on?todayS():"";render();savePrefs();if(on)toast("Marked as sent");return}
+  if(a==="sent"){const on=b.dataset.v==="1";try{localStorage.setItem("fb-sent",on?todayS():"")}catch(_){}S.prefs=S.prefs||{};S.prefs.sent=on?todayS():"";render();savePrefs();if(on){toast("Marked as sent");clearRefillPush()}return}
   if(a==="view"){S.view=b.dataset.v;render();window.scrollTo(0,0);return}
   if(a==="pool"){e.preventDefault();if(S.view==="grace")S.gPool=b.dataset.p;else S.aPool=b.dataset.p;render();document.getElementById("lf-amt")?.focus();return}
   if(a==="newweek"){if(!arm(b,`Tap again to start a new ${PER().noun}`))return;
