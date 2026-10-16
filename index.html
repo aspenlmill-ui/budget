@@ -242,13 +242,13 @@ function budgetFor(p,w){
 }
 function compute(){
   const cw=wk(todayS()),R={};
-  POOLS.forEach(p=>R[p]={adj:{},spent:{},cush:0});
+  POOLS.forEach(p=>R[p]={adj:{},spent:{},cush:0,nextIn:{}});
   for(const t of S.txns){const r=R[t.pool];if(!r)continue;
     if(t.from==="cushion")(R[t.cushPool]||r).cush-=t.amount;else{const w=wk(t.date);r.spent[w]=(r.spent[w]||0)+t.amount}}
   const fs=forcedStarts();
   const ap=(ep,amt,w)=>{const [k,p]=String(ep).split(":");if(!R[p])return;
     if(k==="week")R[p].adj[w]=(R[p].adj[w]||0)+amt;else if(k==="cushion")R[p].cush+=amt;
-    else if(k==="next"){const nx=stepFrom(w,fs);R[p].adj[nx]=(R[p].adj[nx]||0)+amt}};
+    else if(k==="next"){const nx=stepFrom(w,fs);R[p].adj[nx]=(R[p].adj[nx]||0)+amt;R[p].nextIn[nx]=(R[p].nextIn[nx]||0)+amt}};
   for(const m of S.moves){const w=wk(m.date);ap(m.from,-m.amount,w);ap(m.to,m.amount,w)}
   const out={cw};const L=weekStarts(),cush={};
   POOLS.forEach(p=>{cush[p]=R[p].cush;R[p].carry={};R[p].cover={}});
@@ -621,7 +621,7 @@ function refillDue(c){
   const L=c.L,i=L.length-1;if(i<1||dn(todayS())!==c.cw)return [];
   const P=S.plan||{},src=P.refillFrom||"",prev=L[i-1],out=[];
   for(const p of POOLS){const a=linkOf(p);if(src?(!a||a===src):p!=="grace")continue;const r=c.R[p];
-    const left=budgetFor(p,prev)+(r.adj[prev]||0)-(r.carry[prev]||0)-(r.spent[prev]||0),top=Math.round(Math.max(0,budgetFor(p,c.cw)-(r.carry[c.cw]||0)-left)*100)/100;
+    const left=budgetFor(p,prev)+(r.adj[prev]||0)-(r.carry[prev]||0)-(r.spent[prev]||0),top=Math.round(Math.max(0,budgetFor(p,c.cw)+(r.nextIn[c.cw]||0)-(r.carry[c.cw]||0)-left)*100)/100;
     if(top>0.004)out.push({p,top,left,from:src,to:a})}
   return out}
 function refillDueCard(c){const due=refillDue(c);if(!due.length)return "";
@@ -957,7 +957,7 @@ function acctDelta(k){
   if(src){const c=compute(),L=c.L;
     for(let i=1;i<L.length;i++){const w=L[i],prev=L[i-1],ms=dayMs(w);if(ms<=since)continue;
       for(const p of POOLS){const a=linkOf(p);if(!a||a===src||(a!==k&&src!==k))continue;
-        const r=c.R[p],left=budgetFor(p,prev)+(r.adj[prev]||0)-(r.carry[prev]||0)-(r.spent[prev]||0),top=Math.max(0,budgetFor(p,w)-(r.carry[w]||0)-left);
+        const r=c.R[p],left=budgetFor(p,prev)+(r.adj[prev]||0)-(r.carry[prev]||0)-(r.spent[prev]||0),top=Math.max(0,budgetFor(p,w)+(r.nextIn[w]||0)-(r.carry[w]||0)-left);
         if(a===k)d+=top;if(src===k)d-=top}}}
   return Math.round(d*100)/100;
 }
@@ -1893,7 +1893,7 @@ function acctLedger(c,i){
   const src=P.refillFrom||"";
   if(src&&i>0){const prev=L[i-1],ts=dayMs(w);
     for(const p of POOLS){const a=linkOf(p);if(!a||a===src)continue;const r=c.R[p];
-      const left=budgetFor(p,prev)+(r.adj[prev]||0)-(r.carry[prev]||0)-(r.spent[prev]||0),top=Math.max(0,budgetFor(p,w)-(r.carry[w]||0)-left);
+      const left=budgetFor(p,prev)+(r.adj[prev]||0)-(r.carry[prev]||0)-(r.spent[prev]||0),top=Math.max(0,budgetFor(p,w)+(r.nextIn[w]||0)-(r.carry[w]||0)-left);
       add(src,-top,`Refill to ${acctName(a)}`,`${NAMES[p]}'s top-up`,ts);add(a,top,`Refill from ${acctName(src)}`,`${NAMES[p]}'s top-up`,ts)}}
   for(const x of P.paidLog||[])if(!x.skipped&&x.date&&inW(x.date)){const nm=x.key.split("|")[0],b=(P.bills||[]).find(y=>y.name===nm);add(x.acct||(b?billAcct(b):""),-(+x.amount||0),nm,"Bill paid",Date.parse(x.date+"T12:00:00"))}
   for(const x of P.spendLog||[])if(x.date&&inW(x.date))add(x.acct||"usaa",-(+x.amt||0),x.note||x.goal,`From the ${x.goal} bucket`,Date.parse(x.date+"T12:00:00"));
@@ -2092,7 +2092,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202610152204";
+const BUILD="202610160558";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
