@@ -484,7 +484,7 @@ function rescueOptions(c,p){
   add(`next:${p}`,`${NAMES[p]} next ${PER().noun}`,nb,`Next ${PER().noun} ${NAMES[p]} gets less, so it evens out.`,3);
   if(p!=="extras")add("week:extras",`${NAMES.extras} ${PER().this}`,c.extras.left,"That's what Extras is for.",4);
   for(const q of POOLS)if(q!==p&&q!=="extras"){const room=c[q].left-Math.max(0,c[q].alloc*(1-f));add(`week:${q}`,`${NAMES[q]} ${PER().this}`,Math.max(0,room),`${NAMES[q]} is under pace, so there's room.`,5)}
-  if(S.plan){const P=S.plan,bal=acctBal("usaa"),inB=(P.goals||[]).filter(g=>!g.done).reduce((s,g)=>s+(+g.saved||0),0),free=Math.max(0,bal-Math.max(+P.floor||0,inB,0));
+  if(S.plan){const P=S.plan,bal=acctBal("usaa"),inB=inUsaaBuckets(P),free=Math.max(0,bal-Math.max(+P.floor||0,inB,0));
     add("usaa",`${L().save} (unassigned savings)`,free,"Real savings. Use it if nothing above covers it.",6)}
   opts.sort((a,b)=>a.tier-b.tier||b.amt-a.amt);
   return {need,opts};
@@ -1127,7 +1127,7 @@ function vaultTab(){
   const P=S.plan;if(!P)return planTab();
   const lb=L(),sav=acctBal("usaa"),bills=acctBal("chase"),floor=+P.floor||0,goals=P.goals||[],others=P.otherAccts||[];
   const total=sav+bills+others.reduce((s,a)=>s+acctBal("x:"+a.id),0);
-  const inBuckets=goals.filter(g=>!g.done).reduce((s,g)=>s+(+g.saved||0),0),free=sav-inBuckets,above=sav-floor;
+  const inBuckets=inUsaaBuckets(P),cashB=goals.filter(g=>!g.done&&g.cash).reduce((s,g)=>s+(+g.saved||0),0),free=sav-inBuckets,above=sav-floor;
   const c=compute(),cush=POOLS.map(p=>({p,v:c[p].cushion})),cushTot=cush.reduce((s,x)=>s+x.v,0);
   const due=dueBeforePayday("chase"),pay=nextPayday(),billsLeft=bills-due;
   return `<section>
@@ -1161,6 +1161,7 @@ function vaultTab(){
     <div class="card"><h2>Savings</h2>
       <div class="split"><span>${esc(lb.save)}</span><b class="num">${m2(sav)}</b>
         <span>Set aside in buckets</span><b class="num">${m2(inBuckets)}</b>
+        ${cashB>0?`<span class="muted">Plus cash on hand (not in ${esc(lb.save)})</span><b class="num muted">${m2(cashB)}</b>`:""}
         <span>Not assigned yet</span><b class="num" style="color:${free<0?"var(--bad)":"inherit"}">${m2(free)}</b>
         <span class="tot">Above the protected floor</span><b class="num tot">${m2(above)}</b>
         ${(()=>{const due=monthBillsLeft().filter(x=>x.acct==="usaa").reduce((s,x)=>s+x.amt,0),f=Math.round((above-due)*100)/100;
@@ -1196,7 +1197,7 @@ function bucketRow(g,i,n){
   const open=S.openGoal===i,t=+g.target,sv=+g.saved||0,full=t>0&&sv>=t;
   return `<div class="bucket ${open?"open":""}">
     <button class="bk-head" data-act="gopen" data-i="${i}" aria-expanded="${open}">
-      <span class="bk-name">${esc(g.name)}${g.done?` <span class="muted small">· done</span>`:""}</span>
+      <span class="bk-name">${esc(g.name)}${g.cash?` <span class="muted small">· cash</span>`:""}${g.done?` <span class="muted small">· done</span>`:""}</span>
       <span class="num bk-amt">${m0(sv)}${t?`<span class="muted"> / ${m0(t)}</span>`:""}</span>
       ${t?`<span class="bk-bar"><i style="width:${pct(sv,t)}%;${full?"background:var(--good)":""}"></i></span>`:""}
       ${g.when||+g.monthly?`<span class="bk-note muted small">${+g.monthly?`${m0(g.monthly)}/mo`:""}${g.when&&+g.monthly?" · ":""}${esc(g.when||"")}</span>`:""}
@@ -1215,12 +1216,15 @@ function bucketRow(g,i,n){
         <div class="row"><button class="btn" type="submit">Save payment</button><button class="btn ghost" type="button" data-act="gpay" data-i="${i}">Cancel</button></div></form>`:""}`:""}
   </div>`;
 }
+/* Money in buckets that actually sits in USAA (buckets kept as cash don't). */
+function inUsaaBuckets(P){return (P.goals||[]).filter(g=>!g.done&&!g.cash).reduce((s,g)=>s+(+g.saved||0),0)}
 function goalEditForm(g,i,n){return `<form class="goal" id="goaledit" data-i="${i}">
   <label class="f">Name<input id="ge-name" value="${esc(g.name)}"></label>
   <div class="row"><label class="f">Goal<input id="ge-target" inputmode="decimal" value="${esc(g.target||"")}"></label>
     <label class="f">Per month<input id="ge-monthly" inputmode="decimal" value="${esc(g.monthly||"")}"></label>
     <label class="f">Set aside now<input id="ge-saved" inputmode="decimal" value="${esc(g.saved||0)}"></label></div>
   <label class="f">Note<input id="ge-when" value="${esc(g.when||"")}" placeholder="When or why"></label>
+  <label class="check small"><input type="checkbox" id="ge-cash" ${g.cash?"checked":""}> Kept as cash, not in a bank account</label>
   <div class="row"><button class="btn" type="submit">Save</button><button class="btn ghost" type="button" data-act="gcancel">Cancel</button></div>
   <div class="row">${i>0?`<button class="btn sm ghost" type="button" data-act="gmove" data-i="${i}" data-d="-1">Move up</button>`:""}${i<n-1?`<button class="btn sm ghost" type="button" data-act="gmove" data-i="${i}" data-d="1">Move down</button>`:""}
     <button class="btn sm ghost" type="button" data-act="gdel" data-i="${i}" style="color:var(--bad)">Delete bucket</button></div>
@@ -1253,7 +1257,7 @@ function runScenario(amt,pool){
   if(pool!=="none"){take(`${NAMES[pool]} ${PER().this}`,c[pool].left,null);take(`${NAMES[pool]}'s cushion`,c[pool].cushion,`cushion:${pool}`)}
   if(pool!=="extras"){take(`${NAMES.extras} ${PER().this}`,c.extras.left,"week:extras");take(`${NAMES.extras} cushion`,c.extras.cushion,"cushion:extras")}
   for(const q of POOLS)if(q!==pool&&q!=="extras")take(`${NAMES[q]}'s cushion`,c[q].cushion,`cushion:${q}`);
-  if(S.plan){const P=S.plan,bal=acctBal("usaa"),inB=(P.goals||[]).filter(g=>!g.done).reduce((s,g)=>s+(+g.saved||0),0);
+  if(S.plan){const P=S.plan,bal=acctBal("usaa"),inB=inUsaaBuckets(P);
     take(`${L().save}, above the floor`,Math.max(0,bal-Math.max(+P.floor||0,inB,0)),"usaa")}
   return {steps,short:Math.max(0,Math.round(need*100)/100),pool,amt};
 }
@@ -1795,7 +1799,7 @@ document.addEventListener("submit",async e=>{
     render();savePlan();toast(inc.fill?`Added ${m2(amt)}. Buckets: ${inc.fill.map(x=>`${x.name} +${m0(x.amt)}`).join(", ")}`:`Added ${m2(amt)}`)}
   if(f.id==="scf"){const amt=num(val("sc-amt"));if(!(amt>0)){toast("Enter an amount");return}S.scen=runScenario(amt,val("sc-pool"));render()}
   if(f.id==="goaledit"){const i=+f.dataset.i,g=S.plan.goals[i];const name=val("ge-name").trim();if(!name){toast("Give it a name");return}
-    g.name=name;g.target=num(val("ge-target"))||0;g.monthly=num(val("ge-monthly"))||0;const sv=num(val("ge-saved"));if(isFinite(sv))g.saved=sv;g.when=val("ge-when").trim();
+    g.name=name;g.target=num(val("ge-target"))||0;g.monthly=num(val("ge-monthly"))||0;const sv=num(val("ge-saved"));if(isFinite(sv))g.saved=sv;g.when=val("ge-when").trim();g.cash=!!document.getElementById("ge-cash")?.checked;
     S.editGoal=null;render();savePlan();toast("Saved")}
   if(f.id==="acctf"){const name=val("ac-name").trim(),bal=num(val("ac-bal"));if(!name){toast("Name the account");return}
     const id="a"+Math.random().toString(36).slice(2,8);(S.plan.otherAccts||(S.plan.otherAccts=[])).push({id,name,bal:isFinite(bal)?bal:0});
@@ -2078,7 +2082,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202610152101";
+const BUILD="202610152159";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
