@@ -1203,7 +1203,7 @@ function bucketRow(g,i,n){
       ${g.when||+g.monthly?`<span class="bk-note muted small">${+g.monthly?`${m0(g.monthly)}/mo`:""}${g.when&&+g.monthly?" · ":""}${esc(g.when||"")}</span>`:""}
     </button>
     ${open?`<div class="bk-actions">
-      ${g.done?"":`<input id="gadd-${i}" inputmode="decimal" placeholder="Amount"><button class="btn sm" data-act="gadd" data-i="${i}">Add</button><button class="btn sm ghost" data-act="gtake" data-i="${i}">Take out</button>`}
+      ${g.done?"":`<input id="gadd-${i}" inputmode="decimal" placeholder="Amount">${g.cash?`<select id="gsrc-${i}" aria-label="Where the cash came from"><option value="">Cash I already had</option>${acctList().map(a=>`<option value="${esc(a.k)}">Withdrawn from ${esc(a.name)}</option>`).join("")}</select>`:""}<button class="btn sm" data-act="gadd" data-i="${i}">Add</button><button class="btn sm ghost" data-act="gtake" data-i="${i}">Take out</button>`}
       <button class="btn sm ghost" data-act="gpay" data-i="${i}">Paid for it</button>
       <button class="btn sm ghost" data-act="gedit" data-i="${i}">Edit</button>
       <button class="btn sm ghost" data-act="gdone2" data-i="${i}">${g.done?"Not done":"Mark done"}</button></div>
@@ -1666,7 +1666,9 @@ document.addEventListener("click",async e=>{
   if(a==="phase"){S.planPost=b.dataset.v==="post";render();return}
   if(a==="gdone"){const g=S.plan.goals[+b.dataset.i];g.done=b.checked;render();savePlan();return}
   if(a==="gadd"){const i=+b.dataset.i;const v=num(document.getElementById("gadd-"+i).value);if(!isFinite(v)){toast("Enter an amount first");return}
-    const g=S.plan.goals[i];g.saved=Math.round(((+g.saved||0)+v)*100)/100;render();savePlan();toast(`${m0(v)} added to ${g.name}`);return}
+    const g=S.plan.goals[i],src=g.cash?(document.getElementById("gsrc-"+i)?.value||""):"";g.saved=Math.round(((+g.saved||0)+v)*100)/100;
+    if(src&&v>0){acctAdjust(src,-v);(S.plan.spendLog=S.plan.spendLog||[]).push({goal:g.name,amt:v,note:"Cash withdrawn for "+g.name,date:todayS(),acct:src})}
+    render();savePlan();toast(`${m0(v)} added to ${g.name}${src?` · taken out of ${acctName(src)}`:""}`);return}
 });
 
 document.addEventListener("change",e=>{
@@ -2082,7 +2084,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202610152159";
+const BUILD="202610152200";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
