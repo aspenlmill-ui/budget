@@ -134,6 +134,7 @@ function manualDue(plan: any, today: string) {
     for (const off of [0, -1]) {
       const y = M + off < 1 ? Y - 1 : Y, m = (M - 1 + off + 12) % 12, key = `${b.name}|${y}-${String(m + 1).padStart(2, "0")}`;
       if (sn[key] === today) continue;
+      if (b.until && key.split("|")[1] > b.until) continue; // bill has ended
       const due = d === null ? null : Math.round(Date.UTC(y, m, Math.min(d, new Date(Date.UTC(y, m + 1, 0)).getUTCDate())) / DAY);
       if (due !== null && b.added && dn(b.added) > due) continue;
       // deno-lint-ignore no-explicit-any

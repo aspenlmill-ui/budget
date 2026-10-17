@@ -762,7 +762,9 @@ function moveTab(){
 }
 
 /* ---------- plan (owner only; stored so only the owner can read it) ---------- */
-function billTotal(phase){return (S.plan?.bills||[]).filter(b=>!b.phase||b.phase==="both"||b.phase===phase).reduce((s,b)=>s+(+b.amt||0),0)}
+/* A bill can end: "until" is the last month (YYYY-MM) it's due. */
+function billOn(b,ymS){return !b.until||ymS<=b.until}
+function billTotal(phase){const cm=todayS().slice(0,7);return (S.plan?.bills||[]).filter(b=>(!b.phase||b.phase==="both"||b.phase===phase)&&billOn(b,cm)).reduce((s,b)=>s+(+b.amt||0),0)}
 const closingOn=()=>!!S.plan?.closingMode;
 const L=()=>({save:S.plan?.labels?.save||"USAA",bills:S.plan?.labels?.bills||"Chase"});
 const BLANK_PLAN={accounts:{usaa:0,chase:0},otherAccts:[],floor:0,bills:[],debts:[],goals:[{name:"Emergency fund",saved:0,target:1000,monthly:0,when:"Start here",done:false},{name:"Car repairs",saved:0,target:0,monthly:0,when:"",done:false},{name:"Holidays and birthdays",saved:0,target:0,monthly:0,when:"",done:false},{name:"Vacation",saved:0,target:0,monthly:0,when:"",done:false}],paid:[],paycheck:{aspen:0,grace:0,graceBills:0},postClosing:false,labels:{save:"Savings",bills:"Bills account"}};
@@ -778,11 +780,11 @@ function billRows(){
     const d=dayOf(x.b);if(d===null)return {...x,due:null,paid:paid.has(x.b.name+"|"+ym(y,m)),key:x.b.name+"|"+ym(y,m)};
     const due=dueIn(y,m,d),key=x.b.name+"|"+ds(due).slice(0,7);
     return {...x,due,key,paid:paid.has(key),late:!paid.has(key)&&due<today};
-  }).filter(r=>!(r.due!=null&&r.b.added&&dn(r.b.added)>r.due&&!r.paid)); // added after this month's due date: starts next month
+  }).filter(r=>!(r.due!=null&&r.b.added&&dn(r.b.added)>r.due&&!r.paid)&&billOn(r.b,r.key.split("|")[1])); // added after this month's due date: starts next month
   // Last month's bills that still aren't paid stay on the list (up to 2 weeks past due) so nothing slips at the 1st.
   const py=m===0?y-1:y,pm=(m+11)%12,prev=[];
   for(const x of (P.bills||[]).map((b,i)=>({b,i}))){if(x.b.phase&&x.b.phase!=="both"&&x.b.phase!==phase)continue;const d=dayOf(x.b);if(d===null)continue;
-    const due=dueIn(py,pm,d),key=x.b.name+"|"+ds(due).slice(0,7);if(paid.has(key)||due<today-14)continue;
+    const due=dueIn(py,pm,d),key=x.b.name+"|"+ds(due).slice(0,7);if(paid.has(key)||due<today-14||!billOn(x.b,key.split("|")[1]))continue;
     if(x.b.added&&dn(x.b.added)>due)continue;
     prev.push({...x,due,key,paid:false,late:true,prev:true})}
   return [...prev,...rows].sort((a,b)=>(a.due??1e9)-(b.due??1e9));
@@ -859,7 +861,7 @@ function chaseDueUntil(end){
   const P=S.plan,phase=P.postClosing?"post":"pre",paid=new Set(P.paid||[]),today=dn(todayS());let sum=0;const items=[];
   const t=new Date();for(let k=-1;k<3;k++){const y=t.getFullYear()+Math.floor((t.getMonth()+k)/12),m=((t.getMonth()+k)%12+12)%12;
     for(const b of P.bills||[]){if(!(!b.phase||b.phase==="both"||b.phase===phase)||billAcct(b)!=="chase")continue;const d=dayOf(b);if(d===null)continue;
-      const due=dueIn(y,m,d),key=b.name+"|"+ds(due).slice(0,7);if(b.added&&dn(b.added)>due)continue;if(due<end&&!paid.has(key)&&due>=today-31){const am=billLeft(b,key);sum+=am;items.push({name:b.name,due,amt:am})}}}
+      const due=dueIn(y,m,d),key=b.name+"|"+ds(due).slice(0,7);if(b.added&&dn(b.added)>due)continue;if(!billOn(b,key.split("|")[1]))continue;if(due<end&&!paid.has(key)&&due>=today-31){const am=billLeft(b,key);sum+=am;items.push({name:b.name,due,amt:am})}}}
   return {sum:Math.round(sum*100)/100,items:items.sort((a,b)=>a.due-b.due)};
 }
 function incomeSplit(amt,src,dateS){
@@ -1245,7 +1247,7 @@ function goalEditForm(g,i,n){return `<form class="goal" id="goaledit" data-i="${
 function dueBeforePayday(acct){
   if(!S.plan)return 0;const rows=billRows().filter(r=>!acct||billAcct(r.b)===acct),pay=nextPayday(),t=new Date(),y=t.getFullYear(),m=t.getMonth();let sum=0;
   for(const r of rows){const d=dayOf(r.b);if(d===null)continue;if(!r.paid&&r.due<pay)sum+=billLeft(r.b,r.key);
-    if(r.prev)continue;const nx=dueIn(m===11?y+1:y,(m+1)%12,d);if(nx<pay&&nx>r.due)sum+=billAmt(r.b,r.b.name+"|"+ds(nx).slice(0,7))}
+    if(r.prev)continue;const nx=dueIn(m===11?y+1:y,(m+1)%12,d);if(nx<pay&&nx>r.due&&billOn(r.b,ds(nx).slice(0,7)))sum+=billAmt(r.b,r.b.name+"|"+ds(nx).slice(0,7))}
   return sum;
 }
 function runAutopay(){
@@ -1358,6 +1360,7 @@ function billForm(b,i){
     <label class="f">Due day (1–31)<input id="bl-day" inputmode="numeric" value="${dayOf(b)??""}" placeholder="Leave blank if there's no set date"></label>
     <div class="row"><label class="f">Paid from<select id="bl-from">${acctList().map(a=>{const v=a.k==="chase"?"bills":a.k==="usaa"?"savings":a.k;return `<option value="${esc(v)}" ${billAcct(b)===a.k?"selected":""}>${esc(a.name)}</option>`}).join("")}</select></label>
       ${closingOn()?`<label class="f">When<select id="bl-phase"><option value="both" ${!b.phase||b.phase==="both"?"selected":""}>Always</option><option value="pre" ${b.phase==="pre"?"selected":""}>Until closing</option><option value="post" ${b.phase==="post"?"selected":""}>After closing</option></select></label>`:""}</div>
+    <label class="f">Last month it's due (leave blank if it keeps going)<input type="month" id="bl-until" value="${esc(b.until||"")}"></label>
     ${(S.plan.debts||[]).length?`<label class="f">Pays down a debt<select id="bl-debt"><option value="">No</option>${S.plan.debts.map(d=>`<option value="${esc(d.name)}" ${b.debt===d.name?"selected":""}>${esc(d.name)}</option>`).join("")}</select></label>`:""}
     <div class="small muted" id="bl-hint">${billHint(va,ap,!!dayOf(b))}</div>
     <div class="row"><button class="btn" type="submit">Save</button><button class="btn ghost" type="button" data-act="billcancel">Cancel</button></div>
@@ -1831,7 +1834,7 @@ document.addEventListener("submit",async e=>{
     if(ds_&&!(d>=1&&d<=31)){toast("Due day has to be 1 to 31");return}
     if(ap&&!ds_){toast("Autopay needs a due date");return}
     if(S.plan.bills.some((x,j)=>x.name.toLowerCase()===name.toLowerCase()&&String(j)!==String(i))){toast("You already have a bill with that name");return}
-    const fields={name,amt:isFinite(amt)?amt:0,variable:va,auto:ap,day:ds_?String(d):"",from:val("bl-from"),acct:acctName(val("bl-from")==="savings"?"usaa":val("bl-from")==="bills"?"chase":val("bl-from")),phase:document.getElementById("bl-phase")?val("bl-phase"):(i==="new"?"both":S.plan.bills[+i].phase||"both"),...(document.getElementById("bl-debt")?{debt:val("bl-debt")||undefined}:{})};
+    const fields={name,amt:isFinite(amt)?amt:0,variable:va,auto:ap,day:ds_?String(d):"",from:val("bl-from"),acct:acctName(val("bl-from")==="savings"?"usaa":val("bl-from")==="bills"?"chase":val("bl-from")),phase:document.getElementById("bl-phase")?val("bl-phase"):(i==="new"?"both":S.plan.bills[+i].phase||"both"),...(document.getElementById("bl-debt")?{debt:val("bl-debt")||undefined}:{}),until:val("bl-until")||undefined};
     if(i==="new")S.plan.bills.push({...fields,added:todayS()});
     else{const b=S.plan.bills[+i];if(b.name!==name)renameBillKeys(b.name,name);Object.assign(b,fields)}
     S.billEdit=null;render();savePlan();toast(i==="new"?`Added ${name}`:"Saved")}
@@ -2096,7 +2099,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202610160602";
+const BUILD="202610171159";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
