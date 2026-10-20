@@ -467,6 +467,10 @@ function aspenView(){
   ${body}`;
 }
 
+/* Borrowing ahead is capped: at most 10% of a card's next-period budget, counting what's already been borrowed. */
+function borrowPct(){return +(S.settings?.borrowPct??10)}
+function borrowRoom(p,c){c=c||compute();const nx=stepFrom(c.cw,forcedStarts()),cap=budgetFor(p,nx)*borrowPct()/100,used=-(c.R[p].nextIn[nx]||0);
+  return Math.max(0,Math.round((cap-used)*100)/100)}
 function rescueOptions(c,p){
   const need=Math.round(-c[p].left*100)/100,opts=[];
   const add=(ep,label,avail,why,tier)=>{if(avail>0.004)opts.push({ep,label,amt:Math.round(Math.min(need,avail)*100)/100,full:avail>=need-0.004,why,tier})};
@@ -475,14 +479,14 @@ function rescueOptions(c,p){
   const plan=[];let d=need;
   for(const q of [p,...POOLS.filter(q=>q!==p).sort((a,b)=>c[b].cushion-c[a].cushion)]){if(d<=0.004)break;
     const t=Math.round(Math.min(d,Math.max(0,c[q].cushion))*100)/100;if(t>0.004){plan.push({ep:`cushion:${q}`,amt:t});d-=t}}
-  if(d>0.004)plan.push({ep:`next:${p}`,amt:Math.round(d*100)/100});
+  const room=borrowRoom(p,c),bx=Math.round(Math.min(d,room)*100)/100;if(bx>0.004){plan.push({ep:`next:${p}`,amt:bx});d-=bx}
   const pl=plan.filter(x=>x.ep.startsWith("cushion:")).reduce((s,x)=>s+x.amt,0),nx=plan.find(x=>x.ep.startsWith("next:"))?.amt||0;
-  if(plan.length>1)opts.push({ep:"",plan,label:"",amt:need,full:true,tier:0,
+  if(plan.length>1)opts.push({ep:"",plan,label:"",amt:Math.round((need-Math.max(0,d))*100)/100,full:d<=0.004,tier:0,
     head:`Splurge first${nx?", then next "+PER().noun:""}`,
     why:`${m2(pl)} from splurge${nx?` and ${m2(nx)} off ${NAMES[p]}'s next ${PER().noun}`:""}. One tap.`});
   add(`cushion:${p}`,`${NAMES[p]}'s splurge`,c[p].cushion,"Saved leftovers. Nothing else changes.",1);
   for(const q of POOLS)if(q!==p)add(`cushion:${q}`,`${NAMES[q]}'s splurge`,c[q].cushion,"Splurge is everyone's safety net.",2);
-  add(`next:${p}`,`${NAMES[p]} next ${PER().noun}`,nb,`Next ${PER().noun} ${NAMES[p]} gets less, so it evens out.`,3);
+  add(`next:${p}`,`${NAMES[p]} next ${PER().noun} (up to ${borrowPct()}%)`,Math.min(nb,borrowRoom(p,c)),`Next ${PER().noun} ${NAMES[p]} gets less, so it evens out.`,3);
   if(p!=="extras")add("week:extras",`${NAMES.extras} ${PER().this}`,c.extras.left,"That's what Extras is for.",4);
   for(const q of POOLS)if(q!==p&&q!=="extras"){const room=c[q].left-Math.max(0,c[q].alloc*(1-f));add(`week:${q}`,`${NAMES[q]} ${PER().this}`,Math.max(0,room),`${NAMES[q]} is under pace, so there's room.`,5)}
   if(S.plan){const P=S.plan,bal=acctBal("usaa"),inB=inUsaaBuckets(P),free=Math.max(0,bal-Math.max(+P.floor||0,inB,0));
@@ -666,7 +670,7 @@ function weekTab(){
       <div class="bar"><i style="width:${pct(x.spent,x.alloc)}%"></i></div>
       <div class="muted small">${m0(x.spent)} of ${m0(x.alloc)}${x.alloc!==x.budget?` <span title="Includes money moved">(budget ${m0(x.budget)})</span>`:""}</div>
       <span class="chip ${x.cushion<0?"bad":""}">Splurge ${m2(x.cushion)}</span>
-      <button class="x" data-act="borrow" data-p="${p}" style="display:block;margin-top:6px">Borrow from next ${esc(PER().noun)}</button></div>`}).join("")}</div>
+      ${borrowRoom(p,c)>0.004?`<button class="x" data-act="borrow" data-p="${p}" style="display:block;margin-top:6px">Borrow from next ${esc(PER().noun)} (up to ${m2(borrowRoom(p,c))})</button>`:`<div class="small muted" style="margin-top:6px">Borrow limit used for next ${esc(PER().noun)}</div>`}</div>`}).join("")}</div>
     ${splurgeCard(c)}
     <div class="muted small">Splurge is what was left over before. Unspent money rolls in when the ${PER().noun} resets; overspending comes out of it.</div>`}
     ${hideSec("log")?"":logForm(pool,false)}
@@ -686,7 +690,7 @@ function weekTab(){
 function epLabel(ep){if(ep==="in")return "Money added";if(ep.startsWith("next:"))return `${NAMES[ep.slice(5)]} next ${PER().noun}`;if(ep==="usaa")return (S.plan?L().save:"Savings")+" (not in a bucket)";if(ep.startsWith("goal:"))return ep.slice(5);if(ep.startsWith("event:"))return poolName(ep);const [k,p]=ep.split(":");return `${NAMES[p]} ${k==="week"?PER().this:"splurge"}`}
 function goalByEp(ep){return String(ep).startsWith("goal:")?(S.plan?.goals||[]).find(g=>g.name===ep.slice(5)):null}
 function goalBump(ep,delta){const g=goalByEp(ep);if(g){g.saved=Math.round(((+g.saved||0)+delta)*100)/100;return true}return false}
-function epAvail(ep,c){if(ep==="usaa")return null;if(ep.startsWith("next:")){const p=ep.slice(5);return budgetFor(p,nextReset())+(c[p].nextAdj||0)-(c[p].nextCarry||0)}if(ep.startsWith("goal:"))return +(goalByEp(ep)?.saved||0);if(ep.startsWith("event:")){const e=S.events.find(x=>"event:"+x.id===ep);return e?evStats(e).left:0}const [k,p]=ep.split(":");return k==="week"?c[p].left:c[p].cushion}
+function epAvail(ep,c){if(ep==="usaa")return null;if(ep.startsWith("next:"))return borrowRoom(ep.slice(5),c);if(ep.startsWith("goal:"))return +(goalByEp(ep)?.saved||0);if(ep.startsWith("event:")){const e=S.events.find(x=>"event:"+x.id===ep);return e?evStats(e).left:0}const [k,p]=ep.split(":");return k==="week"?c[p].left:c[p].cushion}
 function epGroups(){const g=[["Spending cards",POOLS.map(p=>`week:${p}`)],["Next week's money (borrow ahead)",POOLS.map(p=>`next:${p}`)],["Splurge money",POOLS.map(p=>`cushion:${p}`)],["Special budgets",activeEvents().map(v=>"event:"+v.id)]];
   if(S.plan)g.push(["Savings buckets",(S.plan.goals||[]).filter(x=>!x.done&&x.name).map(x=>"goal:"+x.name)],["Savings account",["usaa"]]);else g.push(["Savings",["usaa"]]);return g.filter(x=>x[1].length)}
 function eps(){return epGroups().flatMap(x=>x[1])}
@@ -746,7 +750,7 @@ function moveTab(){
         <label class="f">Reason<input id="mv-why" placeholder="Birthday dinner"></label>
       </div>
       <button class="btn" type="submit">Move money</button>
-      <div class="muted small">"Next ${PER().noun}'s money" borrows ahead: next ${PER().noun} that card starts lower by the same amount. "${cap(PER().this)}" changes only the current ${PER().noun}. "Splurge" is each card's rolled-over leftovers. Moving into a savings bucket adds to that goal; moving out of one takes from it.</div>
+      <div class="muted small">"Next ${PER().noun}'s money" borrows ahead, up to ${borrowPct()}% of that card's next ${PER().noun}: next ${PER().noun} it starts lower by the same amount. "${cap(PER().this)}" changes only the current ${PER().noun}. "Splurge" is each card's rolled-over leftovers. Moving into a savings bucket adds to that goal; moving out of one takes from it.</div>
     </form>
     <div class="card"><h2>Where things stand</h2>
       ${POOLS.map(p=>`<div class="kv"><span>${NAMES[p]}</span><span class="small muted">now <b>${m2(c[p].left)}</b> · splurge <b>${m2(c[p].cushion)}</b></span></div>`).join("")}
@@ -1715,6 +1719,7 @@ document.addEventListener("change",e=>{
 });
 
 async function addMove(from,to,amount,reason){
+  if(String(from).startsWith("next:")){const p=from.slice(5),room=borrowRoom(p);if(amount>room+0.004){toast(room>0.004?`You can only borrow ${m2(room)} more from ${NAMES[p]}'s next ${PER().noun} (${borrowPct()}% limit)`:`${NAMES[p]} has already borrowed the ${borrowPct()}% limit from next ${PER().noun}`);return}}
   if(from===to){toast("Pick two different places");return}
   const g=goalByEp(from);if(g&&amount>(+g.saved||0)+0.004){toast(`${g.name} only has ${m2(+g.saved||0)}`);return}
   try{await db.collection("moves").add({from,to,amount:Math.round(amount*100)/100,reason:reason||"",date:todayS(),ts:Date.now()});
@@ -2101,7 +2106,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202610200652";
+const BUILD="202610200654";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
