@@ -489,7 +489,7 @@ function rescueOptions(c,p){
   add(`next:${p}`,`${NAMES[p]} next ${PER().noun} (up to ${borrowPct()}%)`,Math.min(nb,borrowRoom(p,c)),`Next ${PER().noun} ${NAMES[p]} gets less, so it evens out.`,3);
   if(p!=="extras")add("week:extras",`${NAMES.extras} ${PER().this}`,c.extras.left,"That's what Extras is for.",4);
   for(const q of POOLS)if(q!==p&&q!=="extras"){const room=c[q].left-Math.max(0,c[q].alloc*(1-f));add(`week:${q}`,`${NAMES[q]} ${PER().this}`,Math.max(0,room),`${NAMES[q]} is under pace, so there's room.`,5)}
-  if(S.plan){const P=S.plan,bal=acctBal("usaa"),inB=inUsaaBuckets(P),free=Math.max(0,bal-Math.max(+P.floor||0,inB,0));
+  if(S.plan){const P=S.plan,bal=usaaShown(),inB=inUsaaBuckets(P),free=Math.max(0,bal-Math.max(+P.floor||0,inB,0));
     add("usaa",`${L().save} (unassigned savings)`,free,"Real savings. Use it if nothing above covers it.",6)}
   opts.sort((a,b)=>a.tier-b.tier||b.amt-a.amt);
   return {need,opts};
@@ -566,7 +566,7 @@ function gettingStarted(){
 /* ---------- spend from a budget (special budgets and savings buckets) ---------- */
 function spendTargets(){
   const ev=activeEvents().map(e=>({k:"ev:"+e.id,name:e.name,left:evStats(e).left,of:evStats(e).budget}));
-  const bk=S.plan?(S.plan.goals||[]).map((g,i)=>({g,i})).filter(x=>!x.g.done&&(+x.g.saved||0)>0).map(x=>({k:"bk:"+x.i,name:x.g.name,left:+x.g.saved||0,of:null})):[];
+  const bk=S.plan?(S.plan.goals||[]).map((g,i)=>({g,i})).filter(x=>!x.g.done&&(!x.g.hidden||S.showReal)&&(+x.g.saved||0)>0).map(x=>({k:"bk:"+x.i,name:x.g.name,left:+x.g.saved||0,of:null})):[];
   return {ev,bk};
 }
 function spendCard(){
@@ -692,7 +692,7 @@ function goalByEp(ep){return String(ep).startsWith("goal:")?(S.plan?.goals||[]).
 function goalBump(ep,delta){const g=goalByEp(ep);if(g){g.saved=Math.round(((+g.saved||0)+delta)*100)/100;return true}return false}
 function epAvail(ep,c){if(ep==="usaa")return null;if(ep.startsWith("next:"))return borrowRoom(ep.slice(5),c);if(ep.startsWith("goal:"))return +(goalByEp(ep)?.saved||0);if(ep.startsWith("event:")){const e=S.events.find(x=>"event:"+x.id===ep);return e?evStats(e).left:0}const [k,p]=ep.split(":");return k==="week"?c[p].left:c[p].cushion}
 function epGroups(){const g=[["Spending cards",POOLS.map(p=>`week:${p}`)],["Next week's money (borrow ahead)",POOLS.map(p=>`next:${p}`)],["Splurge money",POOLS.map(p=>`cushion:${p}`)],["Special budgets",activeEvents().map(v=>"event:"+v.id)]];
-  if(S.plan)g.push(["Savings buckets",(S.plan.goals||[]).filter(x=>!x.done&&x.name).map(x=>"goal:"+x.name)],["Savings account",["usaa"]]);else g.push(["Savings",["usaa"]]);return g.filter(x=>x[1].length)}
+  if(S.plan)g.push(["Savings buckets",(S.plan.goals||[]).filter(x=>!x.done&&x.name&&(!x.hidden||S.showReal)).map(x=>"goal:"+x.name)],["Savings account",["usaa"]]);else g.push(["Savings",["usaa"]]);return g.filter(x=>x[1].length)}
 function eps(){return epGroups().flatMap(x=>x[1])}
 
 /* ---------- add money in: cash, a refund, money from a friend, put straight onto a card, splurge or bucket ---------- */
@@ -974,6 +974,9 @@ function acctDelta(k){
 }
 function acctStored(k){const P=S.plan||{};if(String(k).startsWith("x:"))return +((P.otherAccts||[]).find(a=>"x:"+a.id===k)?.bal)||0;return +(P.accounts?.[k])||0}
 function acctBal(k){return Math.round((acctStored(k)+acctDelta(k))*100)/100}
+/* A hidden cushion: money that really is in USAA but is left out of what you see, so you plan with less. The real balance stays accurate underneath. */
+function hiddenCush(){return Math.round((S.plan?.goals||[]).filter(g=>g.hidden&&!g.done).reduce((s,g)=>s+(+g.saved||0),0)*100)/100}
+function usaaShown(){return Math.round((acctBal("usaa")-(S.showReal?0:hiddenCush()))*100)/100}
 function cardLinkCard(){
   const P=S.plan,m=P.cardAcct||{},accts=acctList();
   const sel=(k,v)=>`<select data-link="${esc(k)}"><option value="">Not linked</option>${accts.map(a=>`<option value="${esc(a.k)}" ${a.k===v?"selected":""}>${esc(a.name)}</option>`).join("")}</select>`;
@@ -1017,7 +1020,7 @@ function bucketFill(amt,saveAfter){
 function fillPreviewHtml(s){
   const save=s.out.usaa||0;if(!(save>0))return "";
   const fe=document.getElementById("if-fill");if(fe?!fe.checked:S.plan.autoFill===false)return "";
-  const bf=bucketFill(save,acctBal("usaa")+save),lb=L();
+  const bf=bucketFill(save,usaaShown()+save),lb=L();
   return `<div class="label" style="margin-top:8px">Savings buckets</div><div class="ledger">
     ${bf.fills.map(f=>`<div><span>${esc(f.name)}</span><b style="color:var(--good)">+${m2(f.amt)}</b></div>`).join("")}
     ${bf.held>0.004?`<div><span class="muted">Kept to stay above the ${m0(+S.plan.floor||0)} floor</span><b class="muted">${m2(bf.held)}</b></div>`:""}
@@ -1083,7 +1086,7 @@ function monthScen(){
   const c=compute(),per=POOLS.reduce((s,p)=>s+c[p].budget,0),forced=forcedStarts();let n=0;
   for(let w=nextReset();w<=end;w=stepFrom(w,forced))n++;
   const spend=r2(n*per);
-  const after=r2(acctList().reduce((s,a)=>s+acctBal(a.k),0)-billRows().filter(r=>!r.paid).reduce((s,r)=>s+billLeft(r.b,r.key),0));
+  const after=r2(acctList().reduce((s,a)=>s+acctBal(a.k),0)-(S.showReal?0:hiddenCush())-billRows().filter(r=>!r.paid).reduce((s,r)=>s+billLeft(r.b,r.key),0));
   const endTot=r2(after+inA+inG+drill-spend);
   return {checks,inA,inG,gn:pays.length,drill,n,spend,after,endTot,free:r2(endTot-(+P.floor||0)),end};
 }
@@ -1137,17 +1140,19 @@ function scenCard(){
 }
 function vaultTab(){
   const P=S.plan;if(!P)return planTab();
-  const lb=L(),sav=acctBal("usaa"),bills=acctBal("chase"),floor=+P.floor||0,goals=P.goals||[],others=P.otherAccts||[];
+  const lb=L(),sav=usaaShown(),bills=acctBal("chase"),floor=+P.floor||0,goals=P.goals||[],others=P.otherAccts||[];
   const total=sav+bills+others.reduce((s,a)=>s+acctBal("x:"+a.id),0);
   const inBuckets=inUsaaBuckets(P),cashB=goals.filter(g=>!g.done&&g.cash).reduce((s,g)=>s+(+g.saved||0),0),free=sav-inBuckets,above=sav-floor;
   const c=compute(),cush=POOLS.map(p=>({p,v:c[p].cushion})),cushTot=cush.reduce((s,x)=>s+x.v,0);
   const due=dueBeforePayday("chase"),pay=nextPayday(),billsLeft=bills-due;
   return `<section>
     <div class="card"><h2>Accounts</h2>
-      <div class="acct"><span>${esc(lb.save)} <span class="muted small">savings</span></span><input data-plan="accounts.usaa" inputmode="decimal" value="${P.accounts?.usaa==null?"":esc(acctBal("usaa").toFixed(2))}"></div>
+      ${hiddenCush()>0&&!S.editUsaa?`<div class="acct"><span>${esc(lb.save)} <span class="muted small">savings</span></span><b class="num">${m2(sav)}</b><button class="x" data-act="usaaedit">Update</button></div>`
+        :`<div class="acct"><span>${esc(lb.save)} <span class="muted small">${hiddenCush()>0?"type what your bank shows":"savings"}</span></span><input data-plan="accounts.usaa" inputmode="decimal" value="${P.accounts?.usaa==null?"":esc(acctBal("usaa").toFixed(2))}"></div>`}
       <div class="acct"><span>${esc(lb.bills)} <span class="muted small">bills</span></span><input data-plan="accounts.chase" inputmode="decimal" value="${P.accounts?.chase==null?"":esc(acctBal("chase").toFixed(2))}"></div>
       ${others.map((a,i)=>`<div class="acct"><span>${esc(a.name)}</span><input data-plan="otherAccts.${i}.bal" inputmode="decimal" value="${esc(acctBal("x:"+a.id).toFixed(2))}"><button class="x" data-act="delacct" data-i="${i}" aria-label="Remove ${esc(a.name)}">✕</button></div>`).join("")}
       <div class="kv tot"><span><b>Total in the bank</b></span><b>${m2(total)}</b></div>
+      ${hiddenCush()>0?`<button class="x small" data-act="showreal" style="margin-top:4px">${S.showReal?`Hide the cushion again`:`Show real balance`}</button>${S.showReal?`<div class="small muted">Includes your hidden cushion of ${m2(hiddenCush())}.</div>`:""}`:""}
       <details><summary class="small"><b>Add an account</b></summary><form class="form" id="acctf" style="margin-top:8px"><div class="row">
         <label class="f">Name<input id="ac-name" placeholder="Grace Checking"></label><label class="f">Balance<input id="ac-bal" inputmode="decimal" placeholder="0"></label></div>
         <button class="btn ghost" type="submit">Add account</button></form></details>
@@ -1187,7 +1192,7 @@ function vaultTab(){
     </div>
 
     <div class="card"><h2>What we're saving for</h2>
-      <div class="list">${goals.map((g,i)=>g.done?"":bucketRow(g,i,goals.length)).join("")}</div>
+      <div class="list">${goals.map((g,i)=>g.done||(g.hidden&&!S.showReal)?"":bucketRow(g,i,goals.length)).join("")}</div>
       ${goals.some(g=>g.done)?`<details style="margin-top:8px"><summary class="small muted">Done (${goals.filter(g=>g.done).length})</summary><div class="list">${goals.map((g,i)=>g.done?bucketRow(g,i,goals.length):"").join("")}</div></details>`:""}
       <form class="form" id="goalf" style="margin-top:10px"><div class="row">
         <label class="f">New bucket<input id="gf-name" placeholder="Car repairs"></label>
@@ -1235,7 +1240,7 @@ function debtPaid(d){const P=S.plan||{},names=new Set((P.bills||[]).filter(b=>b.
 function debtBal(d){return Math.round(Math.max(0,(+d.bal||0)-debtPaid(d))*100)/100}
 /* A payoff bucket linked to a debt aims for what's still owed. */
 function syncDebtGoals(){const P=S.plan;if(!P)return;for(const g of P.goals||[]){if(!g.debt)continue;const d=(P.debts||[]).find(x=>x.name===g.debt);if(d)g.target=debtBal(d)}}
-function inUsaaBuckets(P){return (P.goals||[]).filter(g=>!g.done&&!g.cash).reduce((s,g)=>s+(+g.saved||0),0)}
+function inUsaaBuckets(P){return (P.goals||[]).filter(g=>!g.done&&!g.cash&&!g.hidden).reduce((s,g)=>s+(+g.saved||0),0)}
 function goalEditForm(g,i,n){return `<form class="goal" id="goaledit" data-i="${i}">
   <label class="f">Name<input id="ge-name" value="${esc(g.name)}"></label>
   <div class="row"><label class="f">Goal<input id="ge-target" inputmode="decimal" value="${esc(g.target||"")}"></label>
@@ -1275,7 +1280,7 @@ function runScenario(amt,pool){
   if(pool!=="none"){take(`${NAMES[pool]} ${PER().this}`,c[pool].left,null);take(`${NAMES[pool]}'s cushion`,c[pool].cushion,`cushion:${pool}`)}
   if(pool!=="extras"){take(`${NAMES.extras} ${PER().this}`,c.extras.left,"week:extras");take(`${NAMES.extras} cushion`,c.extras.cushion,"cushion:extras")}
   for(const q of POOLS)if(q!==pool&&q!=="extras")take(`${NAMES[q]}'s cushion`,c[q].cushion,`cushion:${q}`);
-  if(S.plan){const P=S.plan,bal=acctBal("usaa"),inB=inUsaaBuckets(P);
+  if(S.plan){const P=S.plan,bal=usaaShown(),inB=inUsaaBuckets(P);
     take(`${L().save}, above the floor`,Math.max(0,bal-Math.max(+P.floor||0,inB,0)),"usaa")}
   return {steps,short:Math.max(0,Math.round(need*100)/100),pool,amt};
 }
@@ -1418,7 +1423,7 @@ function planTab(){
   const check=+P.paycheck?.aspen||0;
   const toSave=check-perCheck-spend;
   const gNet=(+P.paycheck?.grace||0)-(+P.paycheck?.graceBills||0)*12/26;
-  const above=(acctBal("usaa"))-(+P.floor||0);
+  const above=usaaShown()-(+P.floor||0);
   const goals=P.goals||[];
   return `<section>
     ${incomeCard()}
@@ -1641,6 +1646,8 @@ document.addEventListener("click",async e=>{
   if(a==="theme"){setTheme(b.dataset.v);render();return}
   if(a==="txedit"){S.txEdit=b.dataset.id;S.evOpen=b.dataset.ev||S.evOpen;render();return}
   if(a==="txcancel"){S.txEdit=null;render();return}
+  if(a==="showreal"){S.showReal=!S.showReal;render();return}
+  if(a==="usaaedit"){S.editUsaa=true;render();setTimeout(()=>document.querySelector('[data-plan="accounts.usaa"]')?.focus(),50);return}
   if(a==="gpay"){const i=+b.dataset.i;S.payGoal=S.payGoal===i?null:i;render();return}
   if(a==="gopen"){const i=+b.dataset.i;S.openGoal=S.openGoal===i?null:i;render();return}
   if(a==="gdone2"){const g=S.plan.goals[+b.dataset.i];g.done=!g.done;S.openGoal=null;render();savePlan();return}
@@ -1700,7 +1707,7 @@ document.addEventListener("change",e=>{
     b.day=String(v);render();savePlan();toast(`${b.name} is now due the ${ordinal(v)}`);return}
   if(el.dataset.plan&&S.plan){const v=num(el.value);if(!isFinite(v)){toast("Enter a number");return}
     setPath(S.plan,el.dataset.plan,v);if(/^debts\.\d+\.bal$/.test(el.dataset.plan))S.plan.debts[+el.dataset.plan.split(".")[1]].asOf=todayS();if(el.dataset.plan.startsWith("accounts.")||el.dataset.plan.startsWith("otherAccts.")){S.plan.accounts.updated=todayS();
-      const pa=el.dataset.plan.split("."),k=pa[0]==="accounts"?pa[1]:"x:"+(S.plan.otherAccts[+pa[1]]?.id);S.plan.acctAsOf={...(S.plan.acctAsOf||{}),[k]:Date.now()}}render();savePlan()}
+      const pa=el.dataset.plan.split("."),k=pa[0]==="accounts"?pa[1]:"x:"+(S.plan.otherAccts[+pa[1]]?.id);S.plan.acctAsOf={...(S.plan.acctAsOf||{}),[k]:Date.now()};S.editUsaa=false}render();savePlan()}
   if(el.dataset.link!=null&&S.plan){const P=S.plan,k=el.dataset.link,v=el.value;P.cardAcct=P.cardAcct||{};
     const now=Date.now(),asOf=P.acctAsOf=P.acctAsOf||{};
     // start counting from now for any account that becomes linked, so older purchases aren't taken out twice
@@ -1814,7 +1821,7 @@ document.addEventListener("submit",async e=>{
     const inc={id:Date.now(),src:val("if-src"),amt,date:val("if-date")||todayS(),note:val("if-note").trim().slice(0,80),to:to===""?"":+to};
     const d=depositPlan(amt,inc.src,inc.date,inc.to!=="");
     if(inc.to===""&&document.getElementById("if-fill")?.checked&&(d.out.usaa||0)>0){
-      const bf=bucketFill(d.out.usaa,acctBal("usaa")+d.out.usaa);
+      const bf=bucketFill(d.out.usaa,usaaShown()+d.out.usaa);
       for(const x of bf.fills){const g=S.plan.goals[x.i];g.saved=Math.round(((+g.saved||0)+x.amt)*100)/100}
       if(bf.fills.length)inc.fill=bf.fills.map(x=>({name:x.name,amt:x.amt}))}
     if(document.getElementById("if-bal")?.checked){for(const [k,v] of Object.entries(d.out))acctAdjust(k,v);inc.applied=d.out}
@@ -2106,7 +2113,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202610210720";
+const BUILD="202610230730";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
