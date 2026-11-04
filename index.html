@@ -748,7 +748,7 @@ function addMoneyCard(c){
       <label class="f">From<input id="am-note" placeholder="Sold the old dresser"></label></div>
     <label class="f">Put it toward<select id="am-to">
       ${fixes.length?`<optgroup label="Make up for overspending">${fixes.map(f=>`<option value="fix:${esc(f.k)}" ${sel==="fix:"+f.k?"selected":""}>${esc(f.label)}</option>`).join("")}</optgroup>`:""}
-      ${epGroups().map(([gl,list])=>`<optgroup label="${esc(gl)}">${list.map(e=>`<option value="${esc(e)}" ${e===sel?"selected":""}>${esc(epLabel(e))}</option>`).join("")}</optgroup>`).join("")}</select></label>
+      ${epGroups().filter(([gl,list])=>!list.some(e=>e.startsWith("next:"))).map(([gl,list])=>`<optgroup label="${esc(gl)}">${list.map(e=>`<option value="${esc(e)}" ${e===sel?"selected":""}>${esc(epLabel(e))}</option>`).join("")}</optgroup>`).join("")}</select></label>
     <button class="btn" type="submit">Add money</button></form>`}
 document.addEventListener("change",e=>{if(e.target.id==="am-to")S.amTo=e.target.value});
 let amBusy=false;
@@ -2149,7 +2149,7 @@ document.addEventListener("submit",async e=>{
 });
 
 /* ---------- stay up to date: reload when a new version is published ---------- */
-const BUILD="202611010913";
+const BUILD="202611040807";
 async function checkUpdate(){
   try{const r=await fetch("version.txt?"+Date.now(),{cache:"no-store"});if(!r.ok)return;const v=(await r.text()).trim();
     const typing=document.activeElement&&/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
